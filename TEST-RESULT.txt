@@ -1,0 +1,33 @@
+Test date: 2026-07-10
+
+Local build and behavioral checks:
+- `npm test` passed using portable Node.js `v22.17.0`
+- `npm test` also passed inside WSL Ubuntu 24.04 using portable Node.js `v22.17.0`
+- Build output regenerated: `dist/three-state-switch-card.js`
+- Behavioral check coverage now includes:
+  - custom element registration
+  - card metadata registration
+  - config validation errors
+  - stub entity suggestion
+  - service call payloads
+  - optimistic pending lifecycle
+  - Home Assistant notification event on failure
+
+Home Assistant runtime testing:
+- `Home Assistant 2026.2.2` install on Python 3.13 failed on Windows because `lru-dict`
+  required local MSVC build tools.
+- `Home Assistant 2025.1.4` installed successfully on Python 3.12 in WSL Ubuntu 24.04.
+- `ha-test-config/configuration.yaml` passed `homeassistant --script check_config` in WSL.
+- Home Assistant served `/local/three-state-switch-card/three-state-switch-card.js?v=0.1.0`
+  from the test config in WSL; fetched file size was `25293` bytes and contained
+  `const CARD_VERSION = "0.1.0";`.
+- Runtime warnings seen during WSL boot:
+  - `aiohttp_fast_zlib` fell back to plain `zlib`
+  - Python `3.12.3` is deprecated for Home Assistant `2025.1.4` and should move to `3.13`
+
+Prepared artifacts for later live HA verification:
+- `ha-test-config/configuration.yaml`
+- `ha-test-config/ui-lovelace.yaml`
+- `ha-test-config/www/three-state-switch-card/three-state-switch-card.js`
+- `scripts/wsl-setup-ha.sh`
+- `scripts/wsl-ha-smoke.sh`

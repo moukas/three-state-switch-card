@@ -1,0 +1,14 @@
+lovelace:
+  mode: yaml
+  resources:
+    - url: /local/three-state-switch-card/three-state-switch-card.js?v=0.1.0-flicker-fix
+      type: module
+
+input_select:
+  heating_mode:
+    name: Heating mode
+    options:
+      - "On"
+      - "Auto"
+      - "Off"
+    initial: "Auto"

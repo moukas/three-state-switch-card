@@ -1,0 +1,9 @@
+node_modules/
+.DS_Store
+*.log
+*.log.*
+release/
+ha-test-config/.HA_VERSION
+ha-test-config/.storage/
+ha-test-config/blueprints/
+ha-test-config/deps/

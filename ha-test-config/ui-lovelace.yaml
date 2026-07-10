@@ -1,0 +1,22 @@
+title: Three State Switch Test
+views:
+  - title: Main
+    path: default_view
+    badges: []
+    cards:
+      - type: custom:three-state-switch-card
+        entity: input_select.heating_mode
+        name: Heating
+        subtitle: Operating mode
+        orientation: vertical
+      - type: custom:three-state-switch-card
+        entity: input_select.heating_mode
+        name: Heating
+        orientation: horizontal
+        compact: true
+      - type: custom:three-state-switch-card
+        entity: input_select.heating_mode
+        name: Heating minimal
+        orientation: horizontal
+        variant: minimal
+        show_history: true

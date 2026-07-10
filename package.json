@@ -1,0 +1,23 @@
+{
+  "name": "three-state-switch-card",
+  "version": "0.1.0",
+  "description": "A polished three-position Home Assistant Lovelace switch for input_select and select entities.",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check": "node scripts/check.mjs",
+    "test": "npm run build && npm run check"
+  },
+  "keywords": [
+    "home-assistant",
+    "lovelace",
+    "hacs",
+    "custom-card",
+    "input-select",
+    "select"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  }
+}

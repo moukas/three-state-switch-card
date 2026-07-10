@@ -1,0 +1,32 @@
+# Automatic options from the entity
+type: custom:three-state-switch-card
+entity: input_select.heating_mode
+
+# Full vertical configuration
+type: custom:three-state-switch-card
+entity: input_select.heating_mode
+name: Heating
+subtitle: Operating mode
+orientation: vertical
+interaction: tap-drag
+options:
+  - value: "On"
+    label: "On"
+    icon: mdi:power
+    color: var(--success-color)
+  - value: "Auto"
+    label: "Auto"
+    icon: mdi:autorenew
+    color: var(--primary-color)
+  - value: "Off"
+    label: "Off"
+    icon: mdi:power-off
+    color: var(--disabled-text-color)
+
+# Compact horizontal variant
+type: custom:three-state-switch-card
+entity: select.heat_pump_mode
+orientation: horizontal
+compact: true
+show_subtitle: false
+show_labels: true
