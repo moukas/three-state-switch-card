@@ -250,7 +250,7 @@ historyCard.hass = {
   states: {
     "input_select.demo": {
       state: "Auto",
-      attributes: { options: ["On", "Auto", "Off"] },
+      attributes: { options: ["On", "Auto", "Off"], icon: "mdi:fridge" },
     },
   },
 };
@@ -335,7 +335,7 @@ minimalCard.hass = {
   states: {
     "input_select.demo": {
       state: "Auto",
-      attributes: { options: ["On", "Auto", "Off"] },
+      attributes: { options: ["On", "Auto", "Off"], icon: "mdi:fridge" },
     },
   },
 };
@@ -343,18 +343,19 @@ minimalCard._render();
 assert.match(minimalCard.shadowRoot.innerHTML, /ha-card\s+class="minimal/);
 assert.match(minimalCard.shadowRoot.innerHTML, /class="minimal-row"/);
 assert.match(minimalCard.shadowRoot.innerHTML, /class="minimal-summary"/);
+assert.match(minimalCard.shadowRoot.innerHTML, /class="minimal-state-icon"/);
+assert.match(minimalCard.shadowRoot.innerHTML, /icon="mdi:fridge"/);
 assert.match(minimalCard.shadowRoot.innerHTML, /class="control horizontal inline"/);
 assert.doesNotMatch(minimalCard.shadowRoot.innerHTML, /class="labels horizontal"/);
 assert.doesNotMatch(minimalCard.shadowRoot.innerHTML, /class="history"/);
 assert.doesNotMatch(minimalCard.shadowRoot.innerHTML, /minimal-expanded-control/);
 
 minimalSummaryClick?.({ stopPropagation() {} });
-assert.ok(
-  minimalCard.dispatchedEvents.some(
-    (event) => event.type === "hass-more-info" && event.detail.entityId === "input_select.demo"
-  ),
-  "Clicking the minimal icon/title should open the standard Home Assistant more-info dialog."
-);
+assert.equal(minimalCard._dialogOpen, true);
+minimalCard._render();
+assert.match(minimalCard.shadowRoot.innerHTML, /class="dialog-backdrop"/);
+assert.match(minimalCard.shadowRoot.innerHTML, /class="control vertical dialog"/);
+assert.match(minimalCard.shadowRoot.innerHTML, /class="labels vertical"/);
 
 const failingCard = new Card();
 failingCard.setConfig({ entity: "select.demo", optimistic: true, haptic: false });

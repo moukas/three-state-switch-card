@@ -111,8 +111,9 @@ orientation: vertical
 ```
 
 The minimal variant renders as a compact row with the current icon, entity name, and
-a small inline three-state switch. Clicking the icon or name opens the standard
-Home Assistant more-info dialog for the entity, including its history view.
+a small inline three-state switch. The icon is taken from the entity icon when
+available. Clicking the icon or name opens a modal with the card's animated
+vertical switch.
 
 ## History Timeline
 
@@ -128,4 +129,4 @@ The history timeline uses the Home Assistant recorder history API, similar to th
 standard entity history view. If history is not available yet, the card falls back
 to state changes observed while the dashboard is open.
 Inline history is intentionally not rendered in `variant: minimal`; use the icon
-or name click target to open Home Assistant's standard more-info history instead.
+or name click target to open the larger vertical switch instead.

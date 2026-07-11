@@ -116,6 +116,10 @@ function displayName(hass, config, stateObj) {
   return stateObj?.attributes?.friendly_name ?? config.entity ?? FALLBACK_NAME;
 }
 
+function entityIcon(config, stateObj) {
+  return stateObj?.attributes?.icon ?? config.icon ?? "mdi:toggle-switch-variant";
+}
+
 function haptic(type = "selection") {
   fireEvent(document.body, "haptic", type);
 }
@@ -179,6 +183,7 @@ class ThreeStateSwitchCard extends HTMLElement {
     this._historyFetchTimer = 0;
     this._lastRenderedState = "";
     this._renderQueued = false;
+    this._dialogOpen = false;
   }
 
   setConfig(config) {
@@ -293,6 +298,7 @@ class ThreeStateSwitchCard extends HTMLElement {
     const current = options[currentIndex] ?? { value: "", label: "Unknown state", icon: "mdi:help" };
     const disabled = Boolean(this._config.disabled || unavailable || invalidOptions);
     const name = displayName(this._hass, this._config, stateObj);
+    const icon = entityIcon(this._config, stateObj);
     const subtitle = this._config.subtitle ||
       (unavailable ? "Entity unavailable" :
        invalidOptions ? "Entity must expose exactly three options" :
@@ -306,7 +312,7 @@ class ThreeStateSwitchCard extends HTMLElement {
         aria-disabled="${disabled}"
       >
         ${isMinimal
-          ? this._renderMinimal(name, current, currentIndex, options, disabled)
+          ? this._renderMinimal(name, icon, current, currentIndex, options, disabled)
           : this._renderDefault(name, subtitle, current, currentIndex, options, disabled)}
 
         ${this._config.show_history && !isMinimal ? this._renderHistory(options) : ""}
@@ -338,7 +344,7 @@ class ThreeStateSwitchCard extends HTMLElement {
     `;
   }
 
-  _renderMinimal(name, current, currentIndex, options, disabled) {
+  _renderMinimal(name, icon, current, currentIndex, options, disabled) {
     return `
       <div class="minimal-row">
         <button
@@ -347,13 +353,30 @@ class ThreeStateSwitchCard extends HTMLElement {
           aria-haspopup="dialog"
           aria-label="${escapeHtml(name)}"
         >
-          <ha-icon class="minimal-state-icon" icon="${escapeHtml(current.icon)}"></ha-icon>
+          <ha-icon class="minimal-state-icon" icon="${escapeHtml(icon)}"></ha-icon>
           <span class="minimal-title">${escapeHtml(name)}</span>
         </button>
         <div class="minimal-inline-control">
           ${this._renderControl(name, current, currentIndex, options, disabled, "horizontal", "inline")}
         </div>
       </div>
+      ${this._dialogOpen ? `
+        <div class="dialog-backdrop" role="presentation">
+          <div class="switch-dialog" role="dialog" aria-modal="true" aria-label="${escapeHtml(name)}">
+            <div class="dialog-header">
+              <ha-icon class="dialog-entity-icon" icon="${escapeHtml(icon)}"></ha-icon>
+              <div class="dialog-title">${escapeHtml(name)}</div>
+              <button class="dialog-close" type="button" aria-label="Close">
+                <ha-icon icon="mdi:close"></ha-icon>
+              </button>
+            </div>
+            <div class="dialog-control">
+              ${this._renderControl(name, current, currentIndex, options, disabled, "vertical", "dialog")}
+              ${this._renderLabels(options, currentIndex, disabled, "vertical")}
+            </div>
+          </div>
+        </div>
+      ` : ""}
     `;
   }
 
@@ -569,10 +592,25 @@ class ThreeStateSwitchCard extends HTMLElement {
     const controls = this.shadowRoot.querySelectorAll(".control");
     const interactive = this.shadowRoot.querySelectorAll(".zone, .label");
     const minimalSummary = this.shadowRoot.querySelector(".minimal-summary");
+    const dialogBackdrop = this.shadowRoot.querySelector(".dialog-backdrop");
+    const dialogClose = this.shadowRoot.querySelector(".dialog-close");
 
     minimalSummary?.addEventListener("click", (event) => {
       event.stopPropagation();
-      fireEvent(this, "hass-more-info", { entityId: this._config.entity });
+      this._dialogOpen = true;
+      this._queueRender();
+    });
+
+    dialogClose?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this._dialogOpen = false;
+      this._queueRender();
+    });
+
+    dialogBackdrop?.addEventListener("click", (event) => {
+      if (event.target !== dialogBackdrop) return;
+      this._dialogOpen = false;
+      this._queueRender();
     });
 
     if (disabled) return;
@@ -631,7 +669,7 @@ class ThreeStateSwitchCard extends HTMLElement {
 
   _previewPointer(event, control) {
     const rect = control.getBoundingClientRect();
-    const ratio = this._config.orientation === "horizontal"
+    const ratio = control.classList.contains("horizontal")
       ? (event.clientX - rect.left) / rect.width
       : (event.clientY - rect.top) / rect.height;
     const index = Math.max(0, Math.min(2, Math.floor(ratio * 3)));
@@ -961,6 +999,7 @@ class ThreeStateSwitchCard extends HTMLElement {
         gap: 10px;
       }
       .minimal .control.inline.horizontal { width: 132px; height: 38px; }
+      .minimal .control.dialog.vertical { width: 116px; height: 290px; }
       .minimal .track {
         box-shadow: inset 0 0 0 1px rgba(127,127,127,.1);
       }
@@ -974,11 +1013,84 @@ class ThreeStateSwitchCard extends HTMLElement {
         width: calc((100% - 8px) / 3);
         height: calc(100% - 8px);
       }
+      .minimal .control.dialog.vertical .thumb {
+        left: 6px;
+        top: 6px;
+        width: calc(100% - 12px);
+        height: calc((100% - 12px) / 3);
+      }
       .minimal .control.inline.horizontal .thumb-icon {
         --mdc-icon-size: 17px;
       }
       .minimal .control.inline.horizontal .zone ha-icon {
         --mdc-icon-size: 16px;
+      }
+      .minimal .control.dialog.vertical .thumb-icon {
+        --mdc-icon-size: 24px;
+      }
+      .minimal .control.dialog.vertical .zone ha-icon {
+        --mdc-icon-size: 23px;
+      }
+      .dialog-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 10;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        background: rgba(0,0,0,.45);
+      }
+      .switch-dialog {
+        width: min(320px, 100%);
+        max-height: calc(100vh - 48px);
+        overflow: auto;
+        display: grid;
+        gap: 18px;
+        padding: 18px;
+        border-radius: 12px;
+        background: var(--ha-card-background, var(--card-background-color, #fff));
+        color: var(--primary-text-color);
+        box-shadow: 0 16px 42px rgba(0,0,0,.34);
+      }
+      .dialog-header {
+        display: grid;
+        grid-template-columns: 34px minmax(0, 1fr) 36px;
+        align-items: center;
+        gap: 10px;
+      }
+      .dialog-entity-icon {
+        color: var(--primary-color);
+        --mdc-icon-size: 24px;
+      }
+      .dialog-title {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 18px;
+        font-weight: 600;
+      }
+      .dialog-close {
+        appearance: none;
+        border: 0;
+        border-radius: 50%;
+        width: 36px;
+        height: 36px;
+        padding: 0;
+        display: grid;
+        place-items: center;
+        background: transparent;
+        color: var(--secondary-text-color);
+        cursor: pointer;
+      }
+      .dialog-close:active {
+        background: var(--secondary-background-color, rgba(127,127,127,.16));
+      }
+      .dialog-control {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 12px;
       }
       .minimal .labels {
         gap: 2px;
@@ -1011,6 +1123,7 @@ class ThreeStateSwitchCard extends HTMLElement {
       .compact .labels.vertical { height: 220px; }
       .compact .control.horizontal { height: 82px; }
       .compact.minimal .control.inline.horizontal { width: 116px; height: 34px; }
+      .compact.minimal .control.dialog.vertical { width: 88px; height: 220px; }
       .compact.minimal .labels.vertical { height: 220px; }
       @media (prefers-reduced-motion: reduce) {
         .thumb, .zone, .label { transition: none !important; }
@@ -1023,7 +1136,9 @@ class ThreeStateSwitchCard extends HTMLElement {
         .minimal-summary { grid-template-columns: 30px minmax(0, 1fr); gap: 8px; }
         .minimal-state-icon { width: 30px; height: 30px; --mdc-icon-size: 19px; }
         .minimal .control.inline.horizontal { width: 108px; height: 34px; }
+        .minimal .control.dialog.vertical { width: 96px; height: 250px; }
         .minimal .labels.vertical { height: 250px; }
+        .dialog-backdrop { padding: 16px; }
       }
     `;
   }

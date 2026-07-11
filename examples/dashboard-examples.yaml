@@ -39,7 +39,7 @@ show_history: true
 history_hours: 24
 history_limit: 5
 
-# Minimal switch row; click the icon or name for the standard HA more-info history
+# Minimal switch row; click the icon or name for the animated vertical switch dialog
 type: custom:three-state-switch-card
 entity: input_select.heating_mode
 variant: minimal
