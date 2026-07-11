@@ -17,6 +17,7 @@ uses the first three values from the entity `options` attribute.
 | `entity` | string | required | `input_select.*` or `select.*` |
 | `name` | string | entity name | Card title |
 | `subtitle` | string | active label | Text shown below the title |
+| `variant` | string | `default` | `default` or `minimal` |
 | `orientation` | string | `vertical` | `vertical` or `horizontal` |
 | `reverse` | boolean | `false` | Reverses the state order |
 | `show_name` | boolean | `true` | Shows the title |
@@ -28,6 +29,9 @@ uses the first three values from the entity `options` attribute.
 | `confirm` | boolean | `false` | Shows a confirmation dialog before changing state |
 | `disabled` | boolean | `false` | Read-only mode |
 | `optimistic` | boolean | `true` | Updates the UI immediately before state confirmation |
+| `show_history` | boolean | `false` | Shows a Home Assistant recorder-style state timeline |
+| `history_hours` | number | `24` | Hours shown in the history timeline, from `1` to `168` |
+| `history_limit` | number | `5` | Number of recent state changes listed below the timeline |
 | `options` | array | automatic | Exactly three items |
 
 ## `options` Item Format
@@ -96,3 +100,32 @@ disabled: true
 show_labels: false
 compact: true
 ```
+
+## Minimal Switch Row
+
+```yaml
+type: custom:three-state-switch-card
+entity: input_select.heating_mode
+variant: minimal
+orientation: vertical
+```
+
+The minimal variant renders as a compact row with the current icon, entity name, and
+a small inline three-state switch. Clicking the icon or name opens the standard
+Home Assistant more-info dialog for the entity, including its history view.
+
+## History Timeline
+
+```yaml
+type: custom:three-state-switch-card
+entity: input_select.heating_mode
+show_history: true
+history_hours: 24
+history_limit: 5
+```
+
+The history timeline uses the Home Assistant recorder history API, similar to the
+standard entity history view. If history is not available yet, the card falls back
+to state changes observed while the dashboard is open.
+Inline history is intentionally not rendered in `variant: minimal`; use the icon
+or name click target to open Home Assistant's standard more-info history instead.

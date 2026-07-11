@@ -115,6 +115,7 @@ assert.throws(() => card.setConfig(), /Card configuration is required/);
 assert.throws(() => card.setConfig({}), /entity field is required/);
 assert.throws(() => card.setConfig({ entity: "light.demo" }), /Only input_select and select entities are supported/);
 assert.throws(() => card.setConfig({ entity: "input_select.demo", variant: "glass" }), /variant must be default or minimal/);
+assert.throws(() => card.setConfig({ entity: "input_select.demo", history_hours: 0 }), /history_hours must be an integer/);
 assert.throws(
   () => card.setConfig({ entity: "input_select.demo", options: [{ value: "1" }, { value: "2" }] }),
   /options must contain exactly three items/
@@ -259,12 +260,71 @@ assert.equal(historyCard._history[1].value, "Off");
 historyCard._render();
 assert.match(historyCard.shadowRoot.innerHTML, /class="history"/);
 
-const minimalCard = new Card();
-minimalCard.setConfig({ entity: "input_select.demo", variant: "minimal", orientation: "horizontal" });
-minimalCard.isConnected = true;
-minimalCard.shadowRoot = {
+const recorderHistoryCard = new Card();
+recorderHistoryCard.setConfig({ entity: "input_select.demo", show_history: true, history_hours: 6, history_limit: 2 });
+recorderHistoryCard.isConnected = true;
+recorderHistoryCard.shadowRoot = {
   innerHTML: "",
   querySelector() {
+    return null;
+  },
+  querySelectorAll() {
+    return [];
+  },
+};
+recorderHistoryCard._hass = {
+  callApi: async (method, path) => {
+    recorderHistoryCard._historyCall = { method, path };
+    return [[
+      { state: "On", last_changed: "2026-07-10T10:00:00.000Z" },
+      { s: "Auto", lu: 1783677600 },
+      { s: "Off", lc: 1783681200 },
+    ]];
+  },
+};
+await recorderHistoryCard._fetchHistory(
+  [
+    { value: "On", label: "On", icon: "mdi:power", color: "#43a047" },
+    { value: "Auto", label: "Auto", icon: "mdi:autorenew", color: "#03a9f4" },
+    { value: "Off", label: "Off", icon: "mdi:power-off", color: "#757575" },
+  ],
+  "Off",
+  "input_select.demo|6"
+);
+assert.equal(recorderHistoryCard._historyCall.method, "GET");
+assert.match(recorderHistoryCard._historyCall.path, /^history\/period\//);
+assert.match(recorderHistoryCard._historyCall.path, /filter_entity_id=input_select\.demo/);
+assert.match(recorderHistoryCard._historyCall.path, /minimal_response/);
+recorderHistoryCard._renderHistory([
+  { value: "On", label: "On", icon: "mdi:power", color: "#43a047" },
+  { value: "Auto", label: "Auto", icon: "mdi:autorenew", color: "#03a9f4" },
+  { value: "Off", label: "Off", icon: "mdi:power-off", color: "#757575" },
+]);
+assert.match(recorderHistoryCard._renderHistory([
+  { value: "On", label: "On", icon: "mdi:power", color: "#43a047" },
+  { value: "Auto", label: "Auto", icon: "mdi:autorenew", color: "#03a9f4" },
+  { value: "Off", label: "Off", icon: "mdi:power-off", color: "#757575" },
+]), /class="history-chart"/);
+assert.match(recorderHistoryCard._renderHistory([
+  { value: "On", label: "On", icon: "mdi:power", color: "#43a047" },
+  { value: "Auto", label: "Auto", icon: "mdi:autorenew", color: "#03a9f4" },
+  { value: "Off", label: "Off", icon: "mdi:power-off", color: "#757575" },
+]), /class="history-segment"/);
+
+const minimalCard = new Card();
+minimalCard.setConfig({ entity: "input_select.demo", variant: "minimal", orientation: "horizontal", show_history: true });
+minimalCard.isConnected = true;
+let minimalSummaryClick;
+minimalCard.shadowRoot = {
+  innerHTML: "",
+  querySelector(selector) {
+    if (selector === ".minimal-summary") {
+      return {
+        addEventListener(type, handler) {
+          if (type === "click") minimalSummaryClick = handler;
+        },
+      };
+    }
     return null;
   },
   querySelectorAll() {
@@ -281,6 +341,20 @@ minimalCard.hass = {
 };
 minimalCard._render();
 assert.match(minimalCard.shadowRoot.innerHTML, /ha-card\s+class="minimal/);
+assert.match(minimalCard.shadowRoot.innerHTML, /class="minimal-row"/);
+assert.match(minimalCard.shadowRoot.innerHTML, /class="minimal-summary"/);
+assert.match(minimalCard.shadowRoot.innerHTML, /class="control horizontal inline"/);
+assert.doesNotMatch(minimalCard.shadowRoot.innerHTML, /class="labels horizontal"/);
+assert.doesNotMatch(minimalCard.shadowRoot.innerHTML, /class="history"/);
+assert.doesNotMatch(minimalCard.shadowRoot.innerHTML, /minimal-expanded-control/);
+
+minimalSummaryClick?.({ stopPropagation() {} });
+assert.ok(
+  minimalCard.dispatchedEvents.some(
+    (event) => event.type === "hass-more-info" && event.detail.entityId === "input_select.demo"
+  ),
+  "Clicking the minimal icon/title should open the standard Home Assistant more-info dialog."
+);
 
 const failingCard = new Card();
 failingCard.setConfig({ entity: "select.demo", optimistic: true, haptic: false });

@@ -29,6 +29,7 @@ const DEFAULTS = Object.freeze({
   disabled: false,
   optimistic: true,
   show_history: false,
+  history_hours: 24,
   history_limit: 5,
   options: [],
 });
@@ -123,8 +124,26 @@ function formatHistoryTime(date) {
   return new Intl.DateTimeFormat(undefined, {
     hour: "2-digit",
     minute: "2-digit",
-    second: "2-digit",
   }).format(date);
+}
+
+function historyPercent(date, start, end) {
+  const total = Math.max(1, end.getTime() - start.getTime());
+  return Math.max(0, Math.min(100, ((date.getTime() - start.getTime()) / total) * 100));
+}
+
+function optionForState(options, state) {
+  return options.find((option) => option.value === state);
+}
+
+function historyRowState(row) {
+  return String(row.state ?? row.s ?? "");
+}
+
+function historyRowDate(row, fallback) {
+  const value = row.last_changed ?? row.last_updated ?? row.lc ?? row.lu;
+  if (typeof value === "number") return new Date(value * 1000);
+  return new Date(value ?? fallback);
 }
 
 class ThreeStateSwitchCard extends HTMLElement {
@@ -152,6 +171,12 @@ class ThreeStateSwitchCard extends HTMLElement {
     this._lastStableValue = "";
     this._lastObservedValue = "";
     this._history = [];
+    this._historyTimeline = null;
+    this._historyFetchKey = "";
+    this._historyStateToken = "";
+    this._historyFetchAt = 0;
+    this._historyRequest = 0;
+    this._historyFetchTimer = 0;
     this._lastRenderedState = "";
     this._renderQueued = false;
   }
@@ -172,6 +197,9 @@ class ThreeStateSwitchCard extends HTMLElement {
     }
     if (!["tap", "tap-drag"].includes(merged.interaction)) {
       throw new Error("interaction must be tap or tap-drag.");
+    }
+    if (!Number.isInteger(merged.history_hours) || merged.history_hours < 1 || merged.history_hours > 168) {
+      throw new Error("history_hours must be an integer between 1 and 168.");
     }
     if (!Number.isInteger(merged.history_limit) || merged.history_limit < 1 || merged.history_limit > 20) {
       throw new Error("history_limit must be an integer between 1 and 20.");
@@ -195,6 +223,7 @@ class ThreeStateSwitchCard extends HTMLElement {
       this._lastStableValue = actual;
       this._recordHistory(options[actualIndex]);
     }
+    if (this._config?.variant !== "minimal") this._maybeFetchHistory(options, actual);
     this._queueRender();
   }
 
@@ -215,6 +244,10 @@ class ThreeStateSwitchCard extends HTMLElement {
 
   disconnectedCallback() {
     this._clearPending();
+    if (this._historyFetchTimer) {
+      clearTimeout(this._historyFetchTimer);
+      this._historyFetchTimer = 0;
+    }
     this._pointer = null;
   }
 
@@ -264,6 +297,7 @@ class ThreeStateSwitchCard extends HTMLElement {
       (unavailable ? "Entity unavailable" :
        invalidOptions ? "Entity must expose exactly three options" :
        current.label);
+    const isMinimal = this._config.variant === "minimal";
 
     this.shadowRoot.innerHTML = `
       <style>${this._styles()}</style>
@@ -271,56 +305,11 @@ class ThreeStateSwitchCard extends HTMLElement {
         class="${escapeHtml(this._config.variant)} ${this._config.compact ? "compact" : ""} ${disabled ? "disabled" : ""}"
         aria-disabled="${disabled}"
       >
-        <div class="header">
-          ${this._config.show_name ? `<div class="title">${escapeHtml(name)}</div>` : ""}
-          ${this._config.show_subtitle ? `<div class="subtitle">${escapeHtml(subtitle)}</div>` : ""}
-        </div>
+        ${isMinimal
+          ? this._renderMinimal(name, current, currentIndex, options, disabled)
+          : this._renderDefault(name, subtitle, current, currentIndex, options, disabled)}
 
-        <div class="control-wrap">
-          <div
-            class="control ${escapeHtml(this._config.orientation)}"
-            role="radiogroup"
-            aria-label="${escapeHtml(name)}"
-            tabindex="${disabled ? -1 : 0}"
-            data-index="${currentIndex}"
-          >
-            <div class="track">
-              <div class="thumb" style="--active-color:${escapeHtml(current.color || "var(--primary-color)")}">
-                <ha-icon class="thumb-icon" icon="${escapeHtml(current.icon)}"></ha-icon>
-              </div>
-              ${options.map((option, index) => `
-                <button
-                  class="zone ${index === currentIndex ? "selected" : ""}"
-                  type="button"
-                  role="radio"
-                  aria-checked="${index === currentIndex}"
-                  aria-label="${escapeHtml(option.label)}"
-                  data-index="${index}"
-                  ${disabled ? "disabled" : ""}
-                >
-                  <ha-icon icon="${escapeHtml(option.icon)}"></ha-icon>
-                </button>
-              `).join("")}
-            </div>
-          </div>
-
-          ${this._config.show_labels ? `
-            <div class="labels ${escapeHtml(this._config.orientation)}">
-              ${options.map((option, index) => `
-                <button
-                  type="button"
-                  class="label ${index === currentIndex ? "selected" : ""}"
-                  data-index="${index}"
-                  ${disabled ? "disabled" : ""}
-                >
-                  ${escapeHtml(option.label)}
-                </button>
-              `).join("")}
-            </div>
-          ` : ""}
-        </div>
-
-        ${this._config.show_history ? this._renderHistory() : ""}
+        ${this._config.show_history && !isMinimal ? this._renderHistory(options) : ""}
         ${this._pendingValue ? `<div class="pending" aria-live="polite">Saving...</div>` : ""}
       </ha-card>
     `;
@@ -333,6 +322,88 @@ class ThreeStateSwitchCard extends HTMLElement {
       );
     }
     this._lastRenderedState = currentValue;
+  }
+
+  _renderDefault(name, subtitle, current, currentIndex, options, disabled) {
+    return `
+      <div class="header">
+        ${this._config.show_name ? `<div class="title">${escapeHtml(name)}</div>` : ""}
+        ${this._config.show_subtitle ? `<div class="subtitle">${escapeHtml(subtitle)}</div>` : ""}
+      </div>
+
+      <div class="control-wrap">
+        ${this._renderControl(name, current, currentIndex, options, disabled, this._config.orientation)}
+        ${this._renderLabels(options, currentIndex, disabled, this._config.orientation)}
+      </div>
+    `;
+  }
+
+  _renderMinimal(name, current, currentIndex, options, disabled) {
+    return `
+      <div class="minimal-row">
+        <button
+          class="minimal-summary"
+          type="button"
+          aria-haspopup="dialog"
+          aria-label="${escapeHtml(name)}"
+        >
+          <ha-icon class="minimal-state-icon" icon="${escapeHtml(current.icon)}"></ha-icon>
+          <span class="minimal-title">${escapeHtml(name)}</span>
+        </button>
+        <div class="minimal-inline-control">
+          ${this._renderControl(name, current, currentIndex, options, disabled, "horizontal", "inline")}
+        </div>
+      </div>
+    `;
+  }
+
+  _renderControl(name, current, currentIndex, options, disabled, orientation, mode = "") {
+    return `
+      <div
+        class="control ${escapeHtml(orientation)} ${escapeHtml(mode)}"
+        role="radiogroup"
+        aria-label="${escapeHtml(name)}"
+        tabindex="${disabled ? -1 : 0}"
+        data-index="${currentIndex}"
+      >
+        <div class="track">
+          <div class="thumb" style="--active-color:${escapeHtml(current.color || "var(--primary-color)")}">
+            <ha-icon class="thumb-icon" icon="${escapeHtml(current.icon)}"></ha-icon>
+          </div>
+          ${options.map((option, index) => `
+            <button
+              class="zone ${index === currentIndex ? "selected" : ""}"
+              type="button"
+              role="radio"
+              aria-checked="${index === currentIndex}"
+              aria-label="${escapeHtml(option.label)}"
+              data-index="${index}"
+              ${disabled ? "disabled" : ""}
+            >
+              <ha-icon icon="${escapeHtml(option.icon)}"></ha-icon>
+            </button>
+          `).join("")}
+        </div>
+      </div>
+    `;
+  }
+
+  _renderLabels(options, currentIndex, disabled, orientation) {
+    if (!this._config.show_labels) return "";
+    return `
+      <div class="labels ${escapeHtml(orientation)}">
+        ${options.map((option, index) => `
+          <button
+            type="button"
+            class="label ${index === currentIndex ? "selected" : ""}"
+            data-index="${index}"
+            ${disabled ? "disabled" : ""}
+          >
+            ${escapeHtml(option.label)}
+          </button>
+        `).join("")}
+      </div>
+    `;
   }
 
   _resolveCurrentIndex(options, currentValue) {
@@ -361,12 +432,128 @@ class ThreeStateSwitchCard extends HTMLElement {
     this._history = next.slice(0, this._config?.history_limit ?? DEFAULTS.history_limit);
   }
 
-  _renderHistory() {
-    const items = this._history;
+  _maybeFetchHistory(options, actual) {
+    if (!this._config?.show_history || !this._hass?.callApi || options.length !== 3) return;
+
+    const now = Date.now();
+    const key = `${this._config.entity}|${this._config.history_hours}`;
+    const stateToken = String(actual ?? "");
+    const isFresh = this._historyFetchKey === key &&
+      this._historyStateToken === stateToken &&
+      now - this._historyFetchAt < 60000;
+    if (isFresh) return;
+    if (this._historyFetchTimer) clearTimeout(this._historyFetchTimer);
+
+    this._historyFetchTimer = setTimeout(() => {
+      this._historyFetchTimer = 0;
+      this._fetchHistory(options, stateToken, key);
+    }, 250);
+  }
+
+  async _fetchHistory(options, stateToken, key) {
+    const request = ++this._historyRequest;
+    const end = new Date();
+    const start = new Date(end.getTime() - this._config.history_hours * 60 * 60 * 1000);
+    const path = `history/period/${encodeURIComponent(start.toISOString())}?` + [
+      `filter_entity_id=${encodeURIComponent(this._config.entity)}`,
+      `end_time=${encodeURIComponent(end.toISOString())}`,
+      "minimal_response",
+      "no_attributes",
+    ].join("&");
+
+    try {
+      const response = await this._hass.callApi("GET", path);
+      if (request !== this._historyRequest) return;
+
+      const rows = Array.isArray(response?.[0]) ? response[0] : [];
+      const states = rows
+        .map((row) => ({
+          value: historyRowState(row),
+          at: historyRowDate(row, end),
+        }))
+        .filter((row) => optionForState(options, row.value) && !Number.isNaN(row.at.getTime()))
+        .sort((a, b) => a.at.getTime() - b.at.getTime());
+
+      const current = optionForState(options, stateToken);
+      if (current && states.at(-1)?.value !== current.value) {
+        states.push({ value: current.value, at: end });
+      }
+
+      const segments = states.map((state, index) => {
+        const option = optionForState(options, state.value);
+        const from = state.at < start ? start : state.at;
+        const next = states[index + 1]?.at ?? end;
+        const to = next > end ? end : next;
+        return { option, from, to };
+      }).filter((segment) => segment.option && segment.to > segment.from);
+
+      this._historyTimeline = { start, end, states, segments };
+      this._historyFetchKey = key;
+      this._historyStateToken = stateToken;
+      this._historyFetchAt = Date.now();
+      this._queueRender();
+    } catch (_) {
+      if (request === this._historyRequest) {
+        this._historyTimeline = null;
+        this._historyFetchKey = key;
+        this._historyStateToken = stateToken;
+        this._historyFetchAt = Date.now();
+      }
+    }
+  }
+
+  _renderHistory(options) {
+    if (this._historyTimeline?.segments?.length) {
+      const { start, end, states, segments } = this._historyTimeline;
+      const recent = states
+        .slice()
+        .reverse()
+        .slice(0, this._config.history_limit)
+        .map((entry) => ({ ...optionForState(options, entry.value), at: entry.at }))
+        .filter((entry) => entry.value);
+
+      return `
+        <div class="history" aria-label="Recent state history">
+          <div class="history-chart" title="Last ${escapeHtml(this._config.history_hours)} hours">
+            ${segments.map((segment) => {
+              const left = historyPercent(segment.from, start, end);
+              const right = historyPercent(segment.to, start, end);
+              const width = Math.max(.8, right - left);
+              return `
+                <div
+                  class="history-segment"
+                  style="left:${left}%;width:${width}%;--segment-color:${escapeHtml(segment.option.color || "var(--primary-color)")}"
+                  title="${escapeHtml(segment.option.label)} ${escapeHtml(formatHistoryTime(segment.from))} - ${escapeHtml(formatHistoryTime(segment.to))}"
+                ></div>
+              `;
+            }).join("")}
+          </div>
+          <div class="history-axis">
+            <span>${escapeHtml(formatHistoryTime(start))}</span>
+            <span>${escapeHtml(formatHistoryTime(end))}</span>
+          </div>
+          <div class="history-legend">
+            ${options.map((option) => `
+              <span class="history-legend-item">
+                <span class="history-dot" style="--segment-color:${escapeHtml(option.color || "var(--primary-color)")}"></span>
+                ${escapeHtml(option.label)}
+              </span>
+            `).join("")}
+          </div>
+          ${this._renderHistoryList(recent)}
+        </div>
+      `;
+    }
+
+    const fallback = this._renderHistoryList(this._history);
+    return fallback ? `<div class="history" aria-label="Recent state history">${fallback}</div>` : "";
+  }
+
+  _renderHistoryList(items) {
     if (!items.length) return "";
 
     return `
-      <div class="history" aria-label="Recent state history">
+      <div class="history-list">
         ${items.map((entry) => `
           <div class="history-item">
             <ha-icon class="history-icon" icon="${escapeHtml(entry.icon || "mdi:history")}"></ha-icon>
@@ -379,10 +566,16 @@ class ThreeStateSwitchCard extends HTMLElement {
   }
 
   _bind(options, disabled) {
-    if (disabled) return;
-
-    const control = this.shadowRoot.querySelector(".control");
+    const controls = this.shadowRoot.querySelectorAll(".control");
     const interactive = this.shadowRoot.querySelectorAll(".zone, .label");
+    const minimalSummary = this.shadowRoot.querySelector(".minimal-summary");
+
+    minimalSummary?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      fireEvent(this, "hass-more-info", { entityId: this._config.entity });
+    });
+
+    if (disabled) return;
 
     interactive.forEach((element) => {
       element.addEventListener("click", (event) => {
@@ -391,44 +584,48 @@ class ThreeStateSwitchCard extends HTMLElement {
       });
     });
 
-    control?.addEventListener("keydown", (event) => {
-      const stateObj = this._hass.states?.[this._config.entity];
-      const index = optionIndex(options, this._pendingValue || stateObj?.state);
-      let next = index;
-      if (["ArrowDown", "ArrowRight"].includes(event.key)) next = Math.min(2, index + 1);
-      if (["ArrowUp", "ArrowLeft"].includes(event.key)) next = Math.max(0, index - 1);
-      if (event.key === "Home") next = 0;
-      if (event.key === "End") next = 2;
-      if (next !== index) {
-        event.preventDefault();
-        this._selectIndex(next, options);
-      }
+    controls.forEach((control) => {
+      control.addEventListener("keydown", (event) => {
+        const stateObj = this._hass.states?.[this._config.entity];
+        const index = optionIndex(options, this._pendingValue || stateObj?.state);
+        let next = index;
+        if (["ArrowDown", "ArrowRight"].includes(event.key)) next = Math.min(2, index + 1);
+        if (["ArrowUp", "ArrowLeft"].includes(event.key)) next = Math.max(0, index - 1);
+        if (event.key === "Home") next = 0;
+        if (event.key === "End") next = 2;
+        if (next !== index) {
+          event.preventDefault();
+          this._selectIndex(next, options);
+        }
+      });
     });
 
     if (this._config.interaction !== "tap-drag") return;
 
-    control?.addEventListener("pointerdown", (event) => {
-      if (event.pointerType === "mouse" && event.button !== 0) return;
-      control.setPointerCapture?.(event.pointerId);
-      this._pointer = { id: event.pointerId };
-      this._previewPointer(event, control);
-    });
+    controls.forEach((control) => {
+      control.addEventListener("pointerdown", (event) => {
+        if (event.pointerType === "mouse" && event.button !== 0) return;
+        control.setPointerCapture?.(event.pointerId);
+        this._pointer = { id: event.pointerId };
+        this._previewPointer(event, control);
+      });
 
-    control?.addEventListener("pointermove", (event) => {
-      if (this._pointer?.id !== event.pointerId) return;
-      this._previewPointer(event, control);
-    });
+      control.addEventListener("pointermove", (event) => {
+        if (this._pointer?.id !== event.pointerId) return;
+        this._previewPointer(event, control);
+      });
 
-    const finish = (event) => {
-      if (this._pointer?.id !== event.pointerId) return;
-      const index = this._pointer.index;
-      this._pointer = null;
-      if (Number.isInteger(index)) this._selectIndex(index, options);
-    };
-    control?.addEventListener("pointerup", finish);
-    control?.addEventListener("pointercancel", () => {
-      this._pointer = null;
-      this._queueRender();
+      const finish = (event) => {
+        if (this._pointer?.id !== event.pointerId) return;
+        const index = this._pointer.index;
+        this._pointer = null;
+        if (Number.isInteger(index)) this._selectIndex(index, options);
+      };
+      control.addEventListener("pointerup", finish);
+      control.addEventListener("pointercancel", () => {
+        this._pointer = null;
+        this._queueRender();
+      });
     });
   }
 
@@ -636,8 +833,56 @@ class ThreeStateSwitchCard extends HTMLElement {
       }
       .history {
         display: grid;
-        gap: 6px;
+        gap: 8px;
         padding-top: 4px;
+      }
+      .history-chart {
+        position: relative;
+        height: 34px;
+        border-radius: 8px;
+        overflow: hidden;
+        background: var(--secondary-background-color, rgba(127,127,127,.18));
+        box-shadow: inset 0 0 0 1px rgba(127,127,127,.12);
+      }
+      .history-segment {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        min-width: 2px;
+        background: var(--segment-color, var(--primary-color));
+      }
+      .history-axis {
+        display: flex;
+        justify-content: space-between;
+        color: var(--secondary-text-color);
+        font-size: 11px;
+        line-height: 1;
+        font-variant-numeric: tabular-nums;
+      }
+      .history-legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 10px;
+        min-width: 0;
+      }
+      .history-legend-item {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        color: var(--secondary-text-color);
+        font-size: 11px;
+        line-height: 1.2;
+      }
+      .history-dot {
+        width: 8px;
+        height: 8px;
+        flex: 0 0 auto;
+        border-radius: 50%;
+        background: var(--segment-color, var(--primary-color));
+      }
+      .history-list {
+        display: grid;
+        gap: 6px;
       }
       .history-item {
         display: grid;
@@ -667,24 +912,55 @@ class ThreeStateSwitchCard extends HTMLElement {
       ha-card.minimal {
         --three-state-track: color-mix(in srgb, var(--secondary-background-color, rgba(127,127,127,.18)) 78%, transparent);
         --three-state-radius: 999px;
-        --three-state-card-padding: 16px;
-        gap: 12px;
-      }
-      .minimal .header { text-align: left; }
-      .minimal .title {
-        font-size: 18px;
-        font-weight: 600;
-      }
-      .minimal .subtitle {
-        font-size: 12px;
-        margin-top: 3px;
-      }
-      .minimal .control-wrap {
-        justify-content: flex-start;
+        --three-state-card-padding: 12px;
         gap: 10px;
       }
-      .minimal .control.vertical { width: 72px; height: 182px; }
-      .minimal .control.horizontal { width: min(100%, 204px); height: 44px; }
+      .minimal-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 12px;
+        min-width: 0;
+      }
+      .minimal-summary {
+        appearance: none;
+        border: 0;
+        background: transparent;
+        color: var(--primary-text-color);
+        font: inherit;
+        min-width: 0;
+        padding: 0;
+        display: grid;
+        grid-template-columns: 34px minmax(0, 1fr);
+        align-items: center;
+        gap: 10px;
+        text-align: left;
+        cursor: pointer;
+      }
+      .minimal-state-icon {
+        width: 34px;
+        height: 34px;
+        display: grid;
+        place-items: center;
+        border-radius: 50%;
+        color: var(--primary-color);
+        background: var(--secondary-background-color, rgba(127,127,127,.16));
+        --mdc-icon-size: 21px;
+      }
+      .minimal-title {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 15px;
+        font-weight: 600;
+        line-height: 1.25;
+      }
+      .minimal .control-wrap {
+        justify-content: center;
+        gap: 10px;
+      }
+      .minimal .control.inline.horizontal { width: 132px; height: 38px; }
       .minimal .track {
         box-shadow: inset 0 0 0 1px rgba(127,127,127,.1);
       }
@@ -692,34 +968,26 @@ class ThreeStateSwitchCard extends HTMLElement {
         border-radius: 999px;
         box-shadow: 0 2px 8px rgba(0,0,0,.16);
       }
-      .minimal.vertical .thumb,
-      .minimal .vertical .thumb {
-        left: 4px;
-        top: 4px;
-        width: calc(100% - 8px);
-        height: calc((100% - 8px) / 3);
-      }
-      .minimal.horizontal .thumb,
-      .minimal .horizontal .thumb {
+      .minimal .control.inline.horizontal .thumb {
         left: 4px;
         top: 4px;
         width: calc((100% - 8px) / 3);
         height: calc(100% - 8px);
       }
-      .minimal .thumb-icon {
-        --mdc-icon-size: 20px;
+      .minimal .control.inline.horizontal .thumb-icon {
+        --mdc-icon-size: 17px;
       }
-      .minimal .zone ha-icon {
-        --mdc-icon-size: 18px;
+      .minimal .control.inline.horizontal .zone ha-icon {
+        --mdc-icon-size: 16px;
       }
       .minimal .labels {
         gap: 2px;
       }
       .minimal .labels.vertical {
-        height: 182px;
+        height: 290px;
       }
       .minimal .labels.horizontal {
-        width: min(100%, 204px);
+        width: min(100%, 360px);
       }
       .minimal .label {
         font-size: 12px;
@@ -728,6 +996,10 @@ class ThreeStateSwitchCard extends HTMLElement {
       .minimal .history {
         gap: 4px;
         padding-top: 0;
+      }
+      .minimal .history-chart {
+        height: 24px;
+        border-radius: 6px;
       }
       .minimal .history-item {
         font-size: 11px;
@@ -738,9 +1010,8 @@ class ThreeStateSwitchCard extends HTMLElement {
       .compact .control.vertical { width: 88px; height: 220px; }
       .compact .labels.vertical { height: 220px; }
       .compact .control.horizontal { height: 82px; }
-      .compact.minimal .control.vertical { width: 64px; height: 160px; }
-      .compact.minimal .labels.vertical { height: 160px; }
-      .compact.minimal .control.horizontal { width: min(100%, 180px); height: 38px; }
+      .compact.minimal .control.inline.horizontal { width: 116px; height: 34px; }
+      .compact.minimal .labels.vertical { height: 220px; }
       @media (prefers-reduced-motion: reduce) {
         .thumb, .zone, .label { transition: none !important; }
       }
@@ -748,8 +1019,11 @@ class ThreeStateSwitchCard extends HTMLElement {
         .control-wrap { gap: 8px; }
         .control.vertical { width: 96px; height: 250px; }
         .labels.vertical { height: 250px; }
-        .minimal .control.vertical { width: 68px; height: 170px; }
-        .minimal .labels.vertical { height: 170px; }
+        .minimal-row { gap: 8px; }
+        .minimal-summary { grid-template-columns: 30px minmax(0, 1fr); gap: 8px; }
+        .minimal-state-icon { width: 30px; height: 30px; --mdc-icon-size: 19px; }
+        .minimal .control.inline.horizontal { width: 108px; height: 34px; }
+        .minimal .labels.vertical { height: 250px; }
       }
     `;
   }
@@ -840,6 +1114,9 @@ class ThreeStateSwitchCardEditor extends HTMLElement {
             </label>
           `).join("")}
         </div>
+        <label>History hours
+          <input data-key="history_hours" type="number" min="1" max="168" step="1" value="${escapeHtml(c.history_hours ?? 24)}">
+        </label>
         <label>History limit
           <input data-key="history_limit" type="number" min="1" max="20" step="1" value="${escapeHtml(c.history_limit ?? 5)}">
         </label>

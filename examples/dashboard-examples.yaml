@@ -30,3 +30,16 @@ orientation: horizontal
 compact: true
 show_subtitle: false
 show_labels: true
+
+# Home Assistant recorder-style history timeline
+type: custom:three-state-switch-card
+entity: input_select.heating_mode
+orientation: horizontal
+show_history: true
+history_hours: 24
+history_limit: 5
+
+# Minimal switch row; click the icon or name for the standard HA more-info history
+type: custom:three-state-switch-card
+entity: input_select.heating_mode
+variant: minimal

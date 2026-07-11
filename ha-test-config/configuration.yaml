@@ -1,8 +1,12 @@
 lovelace:
   mode: yaml
   resources:
-    - url: /local/three-state-switch-card/three-state-switch-card.js?v=0.1.0-flicker-fix
+    - url: /local/three-state-switch-card/three-state-switch-card.js?v=0.1.0-minimal-more-info
       type: module
+
+recorder:
+
+history:
 
 input_select:
   heating_mode:

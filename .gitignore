@@ -7,3 +7,4 @@ ha-test-config/.HA_VERSION
 ha-test-config/.storage/
 ha-test-config/blueprints/
 ha-test-config/deps/
+ha-test-config/home-assistant_v2.db*
