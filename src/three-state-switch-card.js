@@ -718,9 +718,9 @@ class ThreeStateSwitchCard extends HTMLElement {
     return `
       :host {
         display: block;
-        --three-state-track: var(--secondary-background-color, rgba(127,127,127,.25));
+        --three-state-track: color-mix(in srgb, var(--secondary-background-color, rgba(127,127,127,.18)) 78%, transparent);
         --three-state-thumb: var(--primary-color);
-        --three-state-radius: 32px;
+        --three-state-radius: 999px;
         --three-state-duration: 280ms;
         --three-state-card-padding: 20px;
       }
@@ -775,7 +775,7 @@ class ThreeStateSwitchCard extends HTMLElement {
         overflow: hidden;
         border-radius: var(--three-state-radius);
         background: var(--three-state-track);
-        box-shadow: inset 0 0 0 1px rgba(127,127,127,.12);
+        box-shadow: inset 0 0 0 1px rgba(127,127,127,.1);
       }
       .vertical .track { grid-template-rows: repeat(3, 1fr); }
       .horizontal .track { grid-template-columns: repeat(3, 1fr); }
@@ -785,8 +785,8 @@ class ThreeStateSwitchCard extends HTMLElement {
         z-index: 2;
         pointer-events: none;
         background: var(--active-color, var(--three-state-thumb));
-        border-radius: calc(var(--three-state-radius) - 6px);
-        box-shadow: 0 5px 16px rgba(0,0,0,.22);
+        border-radius: 999px;
+        box-shadow: 0 2px 8px rgba(0,0,0,.16);
         transition:
           transform var(--three-state-duration) cubic-bezier(.2,.8,.2,1),
           background var(--three-state-duration) ease;
@@ -828,7 +828,7 @@ class ThreeStateSwitchCard extends HTMLElement {
         place-items: center;
         transition: color 180ms ease, opacity 180ms ease, transform 100ms ease;
       }
-      .zone.selected { opacity: 0; }
+      .zone.selected { opacity: .9; }
       .zone:not(.selected) { opacity: .9; }
       .zone:active { transform: scale(.92); }
       .zone ha-icon { --mdc-icon-size: 23px; }
@@ -948,7 +948,6 @@ class ThreeStateSwitchCard extends HTMLElement {
       .disabled .zone, .disabled .label { cursor: not-allowed; }
 
       ha-card.minimal {
-        --three-state-track: color-mix(in srgb, var(--secondary-background-color, rgba(127,127,127,.18)) 78%, transparent);
         --three-state-radius: 999px;
         --three-state-card-padding: 12px;
         gap: 10px;
@@ -1000,13 +999,6 @@ class ThreeStateSwitchCard extends HTMLElement {
       }
       .minimal .control.inline.horizontal { width: 132px; height: 38px; }
       .minimal .control.dialog.vertical { width: 116px; height: 290px; }
-      .minimal .track {
-        box-shadow: inset 0 0 0 1px rgba(127,127,127,.1);
-      }
-      .minimal .thumb {
-        border-radius: 999px;
-        box-shadow: 0 2px 8px rgba(0,0,0,.16);
-      }
       .minimal .control.inline.horizontal .thumb {
         left: 4px;
         top: 4px;
