@@ -14,7 +14,10 @@ uses the first three values from the entity `options` attribute.
 
 | Option | Type | Default | Meaning |
 |---|---|---:|---|
-| `entity` | string | required | `input_select.*` or `select.*` |
+| `entity` | string | optional | Legacy `input_select.*` or `select.*` three-state entity |
+| `state_entity` | string | optional | Actual `on`/`off` state entity for the boolean model |
+| `auto_entity` | string | optional | Boolean entity storing auto/manual mode |
+| `manual_entity` | string | optional | Writable boolean entity for manual on/off requests |
 | `name` | string | entity name | Card title |
 | `subtitle` | string | active label | Text shown below the title |
 | `variant` | string | `default` | `default` or `minimal` |
@@ -32,6 +35,7 @@ uses the first three values from the entity `options` attribute.
 | `show_history` | boolean | `false` | Shows a Home Assistant recorder-style state timeline |
 | `history_hours` | number | `24` | Hours shown in the history timeline, from `1` to `168` |
 | `history_limit` | number | `5` | Number of recent state changes listed below the timeline |
+| `actual_state_entity` | string | empty | Deprecated alias for `state_entity` |
 | `options` | array | automatic | Exactly three items |
 
 ## `options` Item Format
@@ -119,7 +123,9 @@ vertical switch.
 
 ```yaml
 type: custom:three-state-switch-card
-entity: input_select.heating_mode
+state_entity: binary_sensor.heating_active
+auto_entity: input_boolean.heating_auto
+manual_entity: input_boolean.heating_manual
 show_history: true
 history_hours: 24
 history_limit: 5
@@ -128,5 +134,10 @@ history_limit: 5
 The history timeline uses the Home Assistant recorder history API, similar to the
 standard entity history view. If history is not available yet, the card falls back
 to state changes observed while the dashboard is open.
+With `state_entity` and `auto_entity`, the history dialog shows two timelines:
+actual on/off state and auto/manual mode. This lets you distinguish automatic
+operation from manual on/off overrides.
 Inline history is intentionally not rendered in `variant: minimal`; use the icon
 or name click target to open the larger vertical switch instead.
+Default cards also include a chart icon in the header. Clicking it opens a
+history/activity dialog for the entity without showing the switch control.

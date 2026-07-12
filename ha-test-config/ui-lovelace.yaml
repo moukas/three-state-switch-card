@@ -5,17 +5,23 @@ views:
     badges: []
     cards:
       - type: custom:three-state-switch-card
-        entity: input_select.heating_mode
+        state_entity: binary_sensor.heating_active
+        auto_entity: input_boolean.heating_auto
+        manual_entity: input_boolean.heating_manual
         name: Heating
         subtitle: Operating mode
         orientation: vertical
       - type: custom:three-state-switch-card
-        entity: input_select.heating_mode
+        state_entity: binary_sensor.heating_active
+        auto_entity: input_boolean.heating_auto
+        manual_entity: input_boolean.heating_manual
         name: Heating
         orientation: horizontal
         compact: true
       - type: custom:three-state-switch-card
-        entity: input_select.heating_mode
+        state_entity: binary_sensor.heating_active
+        auto_entity: input_boolean.heating_auto
+        manual_entity: input_boolean.heating_manual
         name: Heating minimal
         orientation: horizontal
         variant: minimal

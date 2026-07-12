@@ -31,6 +31,10 @@ const DEFAULTS = Object.freeze({
   show_history: false,
   history_hours: 24,
   history_limit: 5,
+  state_entity: "",
+  auto_entity: "",
+  manual_entity: "",
+  actual_state_entity: "",
   options: [],
 });
 
@@ -131,6 +135,14 @@ function formatHistoryTime(date) {
   }).format(date);
 }
 
+function formatHistoryDate(date) {
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: "short",
+    day: "numeric",
+    month: "long",
+  }).format(date);
+}
+
 function historyPercent(date, start, end) {
   const total = Math.max(1, end.getTime() - start.getTime());
   return Math.max(0, Math.min(100, ((date.getTime() - start.getTime()) / total) * 100));
@@ -138,6 +150,76 @@ function historyPercent(date, start, end) {
 
 function optionForState(options, state) {
   return options.find((option) => option.value === state);
+}
+
+function actualStateOptions(config) {
+  return [
+    {
+      value: "on",
+      label: config.actual_state_on_label || "On",
+      icon: "mdi:power",
+      color: config.actual_state_on_color || "#43a047",
+    },
+    {
+      value: "off",
+      label: config.actual_state_off_label || "Off",
+      icon: "mdi:power-off",
+      color: config.actual_state_off_color || "#757575",
+    },
+  ];
+}
+
+function autoModeOptions(config) {
+  return [
+    {
+      value: "on",
+      label: config.auto_on_label || "Auto",
+      icon: "mdi:autorenew",
+      color: config.auto_on_color || "#03a9f4",
+    },
+    {
+      value: "off",
+      label: config.auto_off_label || "Manual",
+      icon: "mdi:hand-back-right",
+      color: config.auto_off_color || "#ffb300",
+    },
+  ];
+}
+
+function normalizeActualState(value) {
+  const state = String(value ?? "").toLowerCase();
+  if (["on", "true", "open", "active", "heat", "heating", "1"].includes(state)) return "on";
+  if (["off", "false", "closed", "idle", "standby", "0"].includes(state)) return "off";
+  return state;
+}
+
+function isOnState(value) {
+  return normalizeActualState(value) === "on";
+}
+
+function booleanModel(config) {
+  return Boolean(config?.state_entity && config?.auto_entity);
+}
+
+function stateEntity(config) {
+  return config.state_entity || config.actual_state_entity || "";
+}
+
+function manualWriteEntity(config) {
+  return config.manual_entity || stateEntity(config);
+}
+
+function canWriteBooleanEntity(entityId) {
+  return Boolean(entityId) && !["binary_sensor", "sensor"].includes(domainOf(entityId));
+}
+
+function booleanModelOptions(config) {
+  const labels = config.options?.length === 3 ? config.options : [
+    { value: "On", label: "On", icon: "mdi:power", color: "#43a047" },
+    { value: "Auto", label: "Auto", icon: "mdi:autorenew", color: "#03a9f4" },
+    { value: "Off", label: "Off", icon: "mdi:power-off", color: "#757575" },
+  ];
+  return labels.map(normalizeOption);
 }
 
 function historyRowState(row) {
@@ -181,16 +263,31 @@ class ThreeStateSwitchCard extends HTMLElement {
     this._historyFetchAt = 0;
     this._historyRequest = 0;
     this._historyFetchTimer = 0;
+    this._actualHistoryTimeline = null;
+    this._actualHistoryFetchKey = "";
+    this._actualHistoryStateToken = "";
+    this._actualHistoryFetchAt = 0;
+    this._actualHistoryRequest = 0;
+    this._activity = [];
+    this._activityFetchKey = "";
+    this._activityFetchAt = 0;
+    this._activityLoading = false;
+    this._activityRequest = 0;
     this._lastRenderedState = "";
     this._renderQueued = false;
     this._dialogOpen = false;
+    this._historyDialogOpen = false;
   }
 
   setConfig(config) {
     if (!config || typeof config !== "object") throw new Error("Card configuration is required.");
-    if (!config.entity) throw new Error("The entity field is required.");
-    if (!SUPPORTED_DOMAINS.has(domainOf(config.entity))) {
-      throw new Error("Only input_select and select entities are supported.");
+    const hasLegacyEntity = Boolean(config.entity);
+    const hasBooleanEntities = Boolean(config.state_entity && config.auto_entity);
+    if (!hasLegacyEntity && !hasBooleanEntities) {
+      throw new Error("Either entity or state_entity with auto_entity is required.");
+    }
+    if (hasLegacyEntity && !SUPPORTED_DOMAINS.has(domainOf(config.entity))) {
+      throw new Error("Only input_select and select entities are supported for entity.");
     }
 
     const merged = { ...DEFAULTS, ...config };
@@ -220,9 +317,9 @@ class ThreeStateSwitchCard extends HTMLElement {
 
   set hass(value) {
     this._hass = value;
-    const actual = value?.states?.[this._config?.entity]?.state;
+    const actual = this._currentValue();
     if (this._pendingValue && actual === this._pendingValue) this._clearPending();
-    const options = deriveOptions(this._config ?? DEFAULTS, value?.states?.[this._config?.entity]);
+    const options = this._options();
     const actualIndex = findOptionIndex(options, actual);
     if (actualIndex >= 0) {
       this._lastStableValue = actual;
@@ -286,14 +383,49 @@ class ThreeStateSwitchCard extends HTMLElement {
     });
   }
 
+  _primaryStateObj() {
+    if (booleanModel(this._config)) {
+      return this._hass?.states?.[stateEntity(this._config)] ||
+        this._hass?.states?.[this._config.auto_entity];
+    }
+    return this._hass?.states?.[this._config.entity];
+  }
+
+  _options() {
+    if (booleanModel(this._config)) return booleanModelOptions(this._config);
+    return deriveOptions(this._config ?? DEFAULTS, this._hass?.states?.[this._config?.entity]);
+  }
+
+  _currentValue() {
+    if (!booleanModel(this._config)) {
+      return String(this._hass?.states?.[this._config?.entity]?.state ?? "");
+    }
+    const autoState = this._hass?.states?.[this._config.auto_entity]?.state;
+    if (isOnState(autoState)) return "Auto";
+    const actualState = this._hass?.states?.[stateEntity(this._config)]?.state;
+    return isOnState(actualState) ? "On" : "Off";
+  }
+
+  _isUnavailable() {
+    if (!booleanModel(this._config)) {
+      const stateObj = this._hass?.states?.[this._config.entity];
+      return !stateObj || ["unavailable", "unknown"].includes(stateObj.state);
+    }
+    const actual = this._hass?.states?.[stateEntity(this._config)];
+    const auto = this._hass?.states?.[this._config.auto_entity];
+    return !actual || !auto ||
+      ["unavailable", "unknown"].includes(actual.state) ||
+      ["unavailable", "unknown"].includes(auto.state);
+  }
+
   _render() {
     if (!this._config || !this._hass) return;
 
-    const stateObj = this._hass.states?.[this._config.entity];
-    const unavailable = !stateObj || ["unavailable", "unknown"].includes(stateObj.state);
-    const options = deriveOptions(this._config, stateObj);
+    const stateObj = this._primaryStateObj();
+    const unavailable = this._isUnavailable();
+    const options = this._options();
     const invalidOptions = options.length !== 3;
-    const currentValue = this._pendingValue || stateObj?.state || "";
+    const currentValue = this._pendingValue || this._currentValue();
     const currentIndex = this._resolveCurrentIndex(options, currentValue);
     const current = options[currentIndex] ?? { value: "", label: "Unknown state", icon: "mdi:help" };
     const disabled = Boolean(this._config.disabled || unavailable || invalidOptions);
@@ -316,6 +448,7 @@ class ThreeStateSwitchCard extends HTMLElement {
           : this._renderDefault(name, subtitle, current, currentIndex, options, disabled)}
 
         ${this._config.show_history && !isMinimal ? this._renderHistory(options) : ""}
+        ${this._historyDialogOpen && !isMinimal ? this._renderHistoryDialog(name, options) : ""}
         ${this._pendingValue ? `<div class="pending" aria-live="polite">Saving...</div>` : ""}
       </ha-card>
     `;
@@ -333,20 +466,26 @@ class ThreeStateSwitchCard extends HTMLElement {
   _renderDefault(name, subtitle, current, currentIndex, options, disabled) {
     return `
       <div class="header">
+        <button
+          class="history-action"
+          type="button"
+          aria-label="Show entity history"
+          title="Show history"
+        >
+          <ha-icon icon="mdi:chart-line"></ha-icon>
+        </button>
         ${this._config.show_name ? `<div class="title">${escapeHtml(name)}</div>` : ""}
         ${this._config.show_subtitle ? `<div class="subtitle">${escapeHtml(subtitle)}</div>` : ""}
       </div>
-
-      <div class="control-wrap">
-        ${this._renderControl(name, current, currentIndex, options, disabled, this._config.orientation)}
-        ${this._renderLabels(options, currentIndex, disabled, this._config.orientation)}
-      </div>
+      ${this._renderControlLayout(name, current, currentIndex, options, disabled, this._config.orientation)}
     `;
   }
 
   _renderMinimal(name, icon, current, currentIndex, options, disabled) {
+    const accent = escapeHtml(current.color || "var(--primary-color)");
+    const dialogOrientation = this._config.orientation;
     return `
-      <div class="minimal-row">
+      <div class="minimal-row" style="--state-accent:${accent}">
         <button
           class="minimal-summary"
           type="button"
@@ -357,12 +496,12 @@ class ThreeStateSwitchCard extends HTMLElement {
           <span class="minimal-title">${escapeHtml(name)}</span>
         </button>
         <div class="minimal-inline-control">
-          ${this._renderControl(name, current, currentIndex, options, disabled, "horizontal", "inline")}
+          ${this._renderControlLayout(name, current, currentIndex, options, disabled, "horizontal", "inline-layout", "inline", false)}
         </div>
       </div>
       ${this._dialogOpen ? `
         <div class="dialog-backdrop" role="presentation">
-          <div class="switch-dialog" role="dialog" aria-modal="true" aria-label="${escapeHtml(name)}">
+          <div class="switch-dialog" role="dialog" aria-modal="true" aria-label="${escapeHtml(name)}" style="--state-accent:${accent}">
             <div class="dialog-header">
               <ha-icon class="dialog-entity-icon" icon="${escapeHtml(icon)}"></ha-icon>
               <div class="dialog-title">${escapeHtml(name)}</div>
@@ -370,13 +509,19 @@ class ThreeStateSwitchCard extends HTMLElement {
                 <ha-icon icon="mdi:close"></ha-icon>
               </button>
             </div>
-            <div class="dialog-control">
-              ${this._renderControl(name, current, currentIndex, options, disabled, "vertical", "dialog")}
-              ${this._renderLabels(options, currentIndex, disabled, "vertical")}
-            </div>
+            ${this._renderControlLayout(name, current, currentIndex, options, disabled, dialogOrientation, "dialog-control", "dialog")}
           </div>
         </div>
       ` : ""}
+    `;
+  }
+
+  _renderControlLayout(name, current, currentIndex, options, disabled, orientation, layoutClass = "", mode = "", showLabels = true) {
+    return `
+      <div class="control-wrap ${escapeHtml(orientation)} ${escapeHtml(layoutClass)}">
+        ${this._renderControl(name, current, currentIndex, options, disabled, orientation, mode)}
+        ${showLabels ? this._renderLabels(options, currentIndex, disabled, orientation) : ""}
+      </div>
     `;
   }
 
@@ -457,6 +602,7 @@ class ThreeStateSwitchCard extends HTMLElement {
 
   _maybeFetchHistory(options, actual) {
     if (!this._config?.show_history || !this._hass?.callApi || options.length !== 3) return;
+    if (booleanModel(this._config)) return;
 
     const now = Date.now();
     const key = `${this._config.entity}|${this._config.history_hours}`;
@@ -475,10 +621,63 @@ class ThreeStateSwitchCard extends HTMLElement {
 
   async _fetchHistory(options, stateToken, key) {
     const request = ++this._historyRequest;
+    const timeline = await this._fetchEntityTimeline(this._config.entity, options, stateToken, request, () => this._historyRequest);
+    if (!timeline) {
+      if (request === this._historyRequest) {
+        this._historyTimeline = null;
+        this._historyFetchKey = key;
+        this._historyStateToken = stateToken;
+        this._historyFetchAt = Date.now();
+      }
+      return;
+    }
+
+    if (request !== this._historyRequest) return;
+    this._historyTimeline = timeline;
+    this._historyFetchKey = key;
+    this._historyStateToken = stateToken;
+    this._historyFetchAt = Date.now();
+    this._queueRender();
+  }
+
+  async _fetchActualHistory(stateToken, key) {
+    if (!this._config.actual_state_entity) return;
+
+    const request = ++this._actualHistoryRequest;
+    const timeline = await this._fetchEntityTimeline(
+      this._config.actual_state_entity,
+      actualStateOptions(this._config),
+      normalizeActualState(stateToken),
+      request,
+      () => this._actualHistoryRequest,
+      normalizeActualState
+    );
+
+    if (!timeline) {
+      if (request === this._actualHistoryRequest) {
+        this._actualHistoryTimeline = null;
+        this._actualHistoryFetchKey = key;
+        this._actualHistoryStateToken = String(stateToken ?? "");
+        this._actualHistoryFetchAt = Date.now();
+      }
+      return;
+    }
+
+    if (request !== this._actualHistoryRequest) return;
+    this._actualHistoryTimeline = timeline;
+    this._actualHistoryFetchKey = key;
+    this._actualHistoryStateToken = String(stateToken ?? "");
+    this._actualHistoryFetchAt = Date.now();
+    this._queueRender();
+  }
+
+  async _fetchEntityTimeline(entityId, options, stateToken, request, currentRequest, normalize = (value) => String(value ?? "")) {
+    if (!this._hass?.callApi || !entityId) return null;
+
     const end = new Date();
     const start = new Date(end.getTime() - this._config.history_hours * 60 * 60 * 1000);
     const path = `history/period/${encodeURIComponent(start.toISOString())}?` + [
-      `filter_entity_id=${encodeURIComponent(this._config.entity)}`,
+      `filter_entity_id=${encodeURIComponent(entityId)}`,
       `end_time=${encodeURIComponent(end.toISOString())}`,
       "minimal_response",
       "no_attributes",
@@ -486,18 +685,18 @@ class ThreeStateSwitchCard extends HTMLElement {
 
     try {
       const response = await this._hass.callApi("GET", path);
-      if (request !== this._historyRequest) return;
+      if (request !== currentRequest()) return null;
 
       const rows = Array.isArray(response?.[0]) ? response[0] : [];
       const states = rows
         .map((row) => ({
-          value: historyRowState(row),
+          value: normalize(historyRowState(row)),
           at: historyRowDate(row, end),
         }))
         .filter((row) => optionForState(options, row.value) && !Number.isNaN(row.at.getTime()))
         .sort((a, b) => a.at.getTime() - b.at.getTime());
 
-      const current = optionForState(options, stateToken);
+      const current = optionForState(options, normalize(stateToken));
       if (current && states.at(-1)?.value !== current.value) {
         states.push({ value: current.value, at: end });
       }
@@ -510,24 +709,109 @@ class ThreeStateSwitchCard extends HTMLElement {
         return { option, from, to };
       }).filter((segment) => segment.option && segment.to > segment.from);
 
-      this._historyTimeline = { start, end, states, segments };
-      this._historyFetchKey = key;
-      this._historyStateToken = stateToken;
-      this._historyFetchAt = Date.now();
-      this._queueRender();
+      return { start, end, states, segments };
     } catch (_) {
-      if (request === this._historyRequest) {
-        this._historyTimeline = null;
-        this._historyFetchKey = key;
-        this._historyStateToken = stateToken;
-        this._historyFetchAt = Date.now();
+      return null;
+    }
+  }
+
+  async _fetchActivity(key) {
+    if (!this._hass?.callApi || !this._config?.entity) return;
+
+    const now = Date.now();
+    const isFresh = this._activityFetchKey === key && now - this._activityFetchAt < 60000;
+    if (isFresh) return;
+
+    const request = ++this._activityRequest;
+    const end = new Date();
+    const start = new Date(end.getTime() - this._config.history_hours * 60 * 60 * 1000);
+    const activityEntities = [
+      this._config.entity || this._config.auto_entity,
+      stateEntity(this._config),
+      this._config.manual_entity,
+    ]
+      .filter(Boolean)
+      .join(",");
+    const path = `logbook/${encodeURIComponent(start.toISOString())}?` + [
+      `end_time=${encodeURIComponent(end.toISOString())}`,
+      `entity=${encodeURIComponent(activityEntities)}`,
+    ].join("&");
+
+    this._activityLoading = true;
+    this._queueRender();
+
+    try {
+      const response = await this._hass.callApi("GET", path);
+      if (request !== this._activityRequest) return;
+
+      this._activity = Array.isArray(response)
+        ? response.slice(0, this._config.history_limit).map((row) => ({
+          name: String(row.name ?? row.entity_id ?? this._config.entity),
+          message: String(row.message ?? row.state ?? row.event_type ?? ""),
+          when: new Date(row.when ?? row.time_fired ?? row.context_event_time ?? Date.now()),
+        })).filter((row) => !Number.isNaN(row.when.getTime()))
+        : [];
+      this._activityFetchKey = key;
+      this._activityFetchAt = Date.now();
+    } catch (_) {
+      if (request === this._activityRequest) {
+        this._activity = [];
+        this._activityFetchKey = key;
+        this._activityFetchAt = Date.now();
+      }
+    } finally {
+      if (request === this._activityRequest) {
+        this._activityLoading = false;
+        this._queueRender();
       }
     }
   }
 
+  _openHistoryDialog(options) {
+    const controlEntity = this._config.entity || this._config.auto_entity;
+    const stateObj = controlEntity ? this._hass?.states?.[controlEntity] : undefined;
+    const stateToken = String(this._pendingValue || stateObj?.state || "");
+    const actualEntity = stateEntity(this._config);
+    const actualStateObj = actualEntity ? this._hass?.states?.[actualEntity] : undefined;
+    const actualStateToken = String(actualStateObj?.state || "");
+    const key = `${controlEntity}|${this._config.history_hours}|dialog`;
+    const actualKey = `${actualEntity}|${this._config.history_hours}|dialog`;
+
+    this._historyDialogOpen = true;
+    this._queueRender();
+    if (booleanModel(this._config)) {
+      this._fetchEntityTimeline(
+        this._config.auto_entity,
+        autoModeOptions(this._config),
+        this._hass?.states?.[this._config.auto_entity]?.state,
+        ++this._historyRequest,
+        () => this._historyRequest,
+        normalizeActualState
+      ).then((timeline) => {
+        if (timeline) {
+          this._historyTimeline = timeline;
+          this._queueRender();
+        }
+      });
+      this._fetchActualHistory(actualStateToken, actualKey);
+    } else {
+      this._fetchHistory(options, stateToken, key);
+      if (actualEntity) this._fetchActualHistory(actualStateToken, actualKey);
+    }
+    this._fetchActivity(key);
+  }
+
   _renderHistory(options) {
-    if (this._historyTimeline?.segments?.length) {
-      const { start, end, states, segments } = this._historyTimeline;
+    const timeline = this._renderTimeline(this._historyTimeline, options);
+    if (timeline) return timeline;
+
+    const fallback = this._renderHistoryList(this._history);
+    return fallback ? `<div class="history" aria-label="Recent state history">${fallback}</div>` : "";
+  }
+
+  _renderTimeline(timeline, options) {
+    if (timeline?.segments?.length) {
+      const { start, end, states, segments } = timeline;
       const recent = states
         .slice()
         .reverse()
@@ -568,8 +852,74 @@ class ThreeStateSwitchCard extends HTMLElement {
       `;
     }
 
-    const fallback = this._renderHistoryList(this._history);
-    return fallback ? `<div class="history" aria-label="Recent state history">${fallback}</div>` : "";
+    return "";
+  }
+
+  _renderHistoryDialog(name, options) {
+    const hasActual = Boolean(stateEntity(this._config));
+    const actual = hasActual
+      ? this._renderTimeline(this._actualHistoryTimeline, actualStateOptions(this._config)) ||
+        `<div class="history-empty">No on/off history is available yet.</div>`
+      : "";
+    const modeOptions = booleanModel(this._config) ? autoModeOptions(this._config) : options;
+    const mode = this._renderTimeline(this._historyTimeline, modeOptions) ||
+      `<div class="history-empty">No mode history is available yet.</div>`;
+    const activity = this._renderActivity();
+
+    return `
+      <div class="history-dialog-backdrop" role="presentation">
+        <div class="history-dialog" role="dialog" aria-modal="true" aria-label="History">
+          <div class="history-dialog-header">
+            <ha-icon class="history-dialog-icon" icon="mdi:chart-line"></ha-icon>
+            <div class="history-dialog-title">${escapeHtml(name)}</div>
+            <button class="history-dialog-close" type="button" aria-label="Close">
+              <ha-icon icon="mdi:close"></ha-icon>
+            </button>
+          </div>
+          ${hasActual ? `
+            <section class="history-dialog-section">
+              <div class="history-dialog-section-title">Skutečný stav</div>
+              ${actual}
+            </section>
+            <section class="history-dialog-section">
+              <div class="history-dialog-section-title">Režim řízení</div>
+              ${mode}
+            </section>
+          ` : `
+          <section class="history-dialog-section">
+            <div class="history-dialog-section-title">Historie</div>
+            ${mode}
+          </section>
+          `}
+          <section class="history-dialog-section">
+            <div class="history-dialog-section-title">Aktivita</div>
+            ${activity}
+          </section>
+        </div>
+      </div>
+    `;
+  }
+
+  _renderActivity() {
+    if (this._activityLoading && !this._activity.length) {
+      return `<div class="history-empty">Loading activity...</div>`;
+    }
+    if (!this._activity.length) {
+      return `<div class="history-empty">No activity is available yet.</div>`;
+    }
+
+    return `
+      <div class="activity-list">
+        ${this._activity.map((entry) => `
+          <div class="activity-date">${escapeHtml(formatHistoryDate(entry.when))}</div>
+          <div class="activity-item">
+            <span class="activity-dot"></span>
+            <span class="activity-message">${escapeHtml(entry.message || entry.name)}</span>
+            <span class="activity-time">${escapeHtml(formatHistoryTime(entry.when))}</span>
+          </div>
+        `).join("")}
+      </div>
+    `;
   }
 
   _renderHistoryList(items) {
@@ -594,6 +944,14 @@ class ThreeStateSwitchCard extends HTMLElement {
     const minimalSummary = this.shadowRoot.querySelector(".minimal-summary");
     const dialogBackdrop = this.shadowRoot.querySelector(".dialog-backdrop");
     const dialogClose = this.shadowRoot.querySelector(".dialog-close");
+    const historyAction = this.shadowRoot.querySelector(".history-action");
+    const historyDialogBackdrop = this.shadowRoot.querySelector(".history-dialog-backdrop");
+    const historyDialogClose = this.shadowRoot.querySelector(".history-dialog-close");
+
+    historyAction?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this._openHistoryDialog(options);
+    });
 
     minimalSummary?.addEventListener("click", (event) => {
       event.stopPropagation();
@@ -613,6 +971,18 @@ class ThreeStateSwitchCard extends HTMLElement {
       this._queueRender();
     });
 
+    historyDialogClose?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this._historyDialogOpen = false;
+      this._queueRender();
+    });
+
+    historyDialogBackdrop?.addEventListener("click", (event) => {
+      if (event.target !== historyDialogBackdrop) return;
+      this._historyDialogOpen = false;
+      this._queueRender();
+    });
+
     if (disabled) return;
 
     interactive.forEach((element) => {
@@ -624,8 +994,7 @@ class ThreeStateSwitchCard extends HTMLElement {
 
     controls.forEach((control) => {
       control.addEventListener("keydown", (event) => {
-        const stateObj = this._hass.states?.[this._config.entity];
-        const index = optionIndex(options, this._pendingValue || stateObj?.state);
+        const index = optionIndex(options, this._pendingValue || this._currentValue());
         let next = index;
         if (["ArrowDown", "ArrowRight"].includes(event.key)) next = Math.min(2, index + 1);
         if (["ArrowUp", "ArrowLeft"].includes(event.key)) next = Math.max(0, index - 1);
@@ -679,8 +1048,8 @@ class ThreeStateSwitchCard extends HTMLElement {
 
   async _selectIndex(index, options) {
     const option = options[index];
-    const stateObj = this._hass.states?.[this._config.entity];
-    if (!option || option.value === stateObj?.state || option.value === this._pendingValue) return;
+    const currentValue = this._currentValue();
+    if (!option || option.value === currentValue || option.value === this._pendingValue) return;
 
     if (this._config.confirm) {
       const accepted = window.confirm(`Set "${option.label}"?`);
@@ -694,14 +1063,18 @@ class ThreeStateSwitchCard extends HTMLElement {
       this._queueRender();
     }
 
-    const domain = domainOf(this._config.entity);
     try {
-      await this._hass.callService(domain, "select_option", {
-        entity_id: this._config.entity,
-        option: option.value,
-      });
+      if (booleanModel(this._config)) {
+        await this._selectBooleanOption(option);
+      } else {
+        const domain = domainOf(this._config.entity);
+        await this._hass.callService(domain, "select_option", {
+          entity_id: this._config.entity,
+          option: option.value,
+        });
+      }
       fireEvent(this, "three-state-change", {
-        entity: this._config.entity,
+        entity: this._config.entity || stateEntity(this._config),
         option: option.value,
         index,
       });
@@ -712,6 +1085,29 @@ class ThreeStateSwitchCard extends HTMLElement {
         message: `Failed to set ${option.label}: ${error?.message ?? error}`,
       });
     }
+  }
+
+  async _selectBooleanOption(option) {
+    const value = String(option.value).toLowerCase();
+    const writeEntity = manualWriteEntity(this._config);
+
+    if (value === "auto") {
+      await this._setBooleanEntity(this._config.auto_entity, true);
+      return;
+    }
+
+    if (!canWriteBooleanEntity(writeEntity)) {
+      throw new Error("manual_entity must be set to a writable boolean entity for manual On/Off.");
+    }
+
+    await this._setBooleanEntity(this._config.auto_entity, false);
+    await this._setBooleanEntity(writeEntity, value === "on");
+  }
+
+  async _setBooleanEntity(entityId, enabled) {
+    await this._hass.callService("homeassistant", enabled ? "turn_on" : "turn_off", {
+      entity_id: entityId,
+    });
   }
 
   _styles() {
@@ -735,7 +1131,41 @@ class ThreeStateSwitchCard extends HTMLElement {
         gap: 16px;
         touch-action: manipulation;
       }
-      .header { text-align: center; min-width: 0; }
+      .header {
+        position: relative;
+        text-align: center;
+        min-width: 0;
+        padding-inline: 42px;
+      }
+      .history-action {
+        position: absolute;
+        top: -4px;
+        right: 0;
+        width: 36px;
+        height: 36px;
+        padding: 0;
+        border: 0;
+        border-radius: 50%;
+        appearance: none;
+        display: grid;
+        place-items: center;
+        background: transparent;
+        color: var(--secondary-text-color);
+        cursor: pointer;
+        transition: background 160ms ease, color 160ms ease, transform 100ms ease;
+      }
+      .history-action:hover,
+      .history-action:focus-visible {
+        background: var(--secondary-background-color, rgba(127,127,127,.16));
+        color: var(--primary-text-color);
+        outline: none;
+      }
+      .history-action:active {
+        transform: scale(.94);
+      }
+      .history-action ha-icon {
+        --mdc-icon-size: 22px;
+      }
       .title {
         color: var(--primary-text-color);
         font-size: 24px;
@@ -759,6 +1189,10 @@ class ThreeStateSwitchCard extends HTMLElement {
         align-items: center;
         gap: 14px;
         min-height: 0;
+      }
+      .control-wrap.horizontal {
+        flex-direction: column;
+        align-items: center;
       }
       .control {
         position: relative;
@@ -944,6 +1378,116 @@ class ThreeStateSwitchCard extends HTMLElement {
       .history-time {
         font-variant-numeric: tabular-nums;
       }
+      .history-empty {
+        color: var(--secondary-text-color);
+        font-size: 13px;
+        line-height: 1.4;
+      }
+      .history-dialog-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 10;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        background: rgba(0,0,0,.45);
+      }
+      .history-dialog {
+        width: min(640px, 100%);
+        max-height: calc(100vh - 48px);
+        overflow: auto;
+        display: grid;
+        gap: 24px;
+        padding: 24px;
+        border-radius: 12px;
+        background: var(--ha-card-background, var(--card-background-color, #fff));
+        color: var(--primary-text-color);
+        box-shadow: 0 16px 42px rgba(0,0,0,.34);
+      }
+      .history-dialog-header {
+        display: grid;
+        grid-template-columns: 34px minmax(0, 1fr) 36px;
+        align-items: center;
+        gap: 10px;
+      }
+      .history-dialog-icon {
+        color: var(--primary-color);
+        --mdc-icon-size: 24px;
+      }
+      .history-dialog-title {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 20px;
+        font-weight: 700;
+      }
+      .history-dialog-close {
+        appearance: none;
+        border: 0;
+        border-radius: 50%;
+        width: 36px;
+        height: 36px;
+        padding: 0;
+        display: grid;
+        place-items: center;
+        background: transparent;
+        color: var(--secondary-text-color);
+        cursor: pointer;
+      }
+      .history-dialog-close:active {
+        background: var(--secondary-background-color, rgba(127,127,127,.16));
+      }
+      .history-dialog-section {
+        display: grid;
+        gap: 12px;
+        min-width: 0;
+      }
+      .history-dialog-section-title {
+        font-size: 24px;
+        font-weight: 700;
+        line-height: 1.2;
+      }
+      .history-dialog .history {
+        padding-top: 0;
+      }
+      .history-dialog .history-chart {
+        height: 26px;
+      }
+      .activity-list {
+        display: grid;
+        gap: 10px;
+      }
+      .activity-date {
+        margin-top: 4px;
+        color: var(--primary-text-color);
+        font-size: 13px;
+        font-weight: 700;
+      }
+      .activity-item {
+        display: grid;
+        grid-template-columns: 18px minmax(0, 1fr) auto;
+        gap: 10px;
+        align-items: center;
+        color: var(--secondary-text-color);
+        font-size: 13px;
+      }
+      .activity-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: var(--primary-color);
+        justify-self: center;
+      }
+      .activity-message {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .activity-time {
+        font-variant-numeric: tabular-nums;
+      }
       .disabled { opacity: .62; }
       .disabled .zone, .disabled .label { cursor: not-allowed; }
 
@@ -980,8 +1524,9 @@ class ThreeStateSwitchCard extends HTMLElement {
         display: grid;
         place-items: center;
         border-radius: 50%;
-        color: var(--primary-color);
-        background: var(--secondary-background-color, rgba(127,127,127,.16));
+        color: rgba(255,255,255,.98);
+        background: var(--state-accent, var(--primary-color));
+        box-shadow: 0 2px 8px rgba(0,0,0,.16);
         --mdc-icon-size: 21px;
       }
       .minimal-title {
@@ -996,6 +1541,28 @@ class ThreeStateSwitchCard extends HTMLElement {
       .minimal .control-wrap {
         justify-content: center;
         gap: 10px;
+      }
+      .minimal .control-wrap.inline-layout.horizontal {
+        flex-direction: row;
+        align-items: center;
+      }
+      .minimal .control-wrap.dialog-control.horizontal {
+        flex-direction: column;
+        align-items: center;
+      }
+      .minimal .control-wrap.dialog-control.vertical {
+        flex-direction: row;
+        align-items: center;
+      }
+      .minimal .control.inline.horizontal .track {
+        background: color-mix(in srgb, var(--state-accent, var(--three-state-track)) 14%, var(--three-state-track));
+      }
+      .minimal .control.inline.horizontal .zone ha-icon,
+      .minimal .control.dialog.vertical .zone ha-icon {
+        color: color-mix(in srgb, var(--state-accent, var(--primary-color)) 62%, var(--secondary-text-color));
+      }
+      .minimal .label.selected {
+        color: var(--state-accent, var(--primary-text-color));
       }
       .minimal .control.inline.horizontal { width: 132px; height: 38px; }
       .minimal .control.dialog.vertical { width: 116px; height: 290px; }
@@ -1051,7 +1618,7 @@ class ThreeStateSwitchCard extends HTMLElement {
         gap: 10px;
       }
       .dialog-entity-icon {
-        color: var(--primary-color);
+        color: var(--state-accent, var(--primary-color));
         --mdc-icon-size: 24px;
       }
       .dialog-title {
@@ -1079,9 +1646,7 @@ class ThreeStateSwitchCard extends HTMLElement {
         background: var(--secondary-background-color, rgba(127,127,127,.16));
       }
       .dialog-control {
-        display: flex;
         justify-content: center;
-        align-items: center;
         gap: 12px;
       }
       .minimal .labels {
@@ -1131,6 +1696,7 @@ class ThreeStateSwitchCard extends HTMLElement {
         .minimal .control.dialog.vertical { width: 96px; height: 250px; }
         .minimal .labels.vertical { height: 250px; }
         .dialog-backdrop { padding: 16px; }
+        .history-dialog-backdrop { padding: 16px; }
       }
     `;
   }
@@ -1162,7 +1728,7 @@ class ThreeStateSwitchCardEditor extends HTMLElement {
         :host { display:block; }
         .form { display:grid; gap:14px; padding:4px 0; }
         label { display:grid; gap:6px; color:var(--primary-text-color); font-size:13px; }
-        input, select {
+        input, select, ha-entity-picker {
           width:100%; min-height:40px; padding:8px 10px;
           border:1px solid var(--divider-color); border-radius:8px;
           background:var(--card-background-color); color:var(--primary-text-color);
@@ -1177,7 +1743,16 @@ class ThreeStateSwitchCardEditor extends HTMLElement {
       </style>
       <div class="form">
         <label>Entity
-          <input data-key="entity" value="${escapeHtml(c.entity ?? "")}" placeholder="input_select.mode">
+          <ha-entity-picker data-key="entity" value="${escapeHtml(c.entity ?? "")}" include-domains="input_select,select"></ha-entity-picker>
+        </label>
+        <label>Actual on/off state entity
+          <ha-entity-picker data-key="state_entity" value="${escapeHtml(c.state_entity ?? c.actual_state_entity ?? "")}"></ha-entity-picker>
+        </label>
+        <label>Auto mode entity
+          <ha-entity-picker data-key="auto_entity" value="${escapeHtml(c.auto_entity ?? "")}" include-domains="input_boolean,switch,binary_sensor"></ha-entity-picker>
+        </label>
+        <label>Manual on/off write entity
+          <ha-entity-picker data-key="manual_entity" value="${escapeHtml(c.manual_entity ?? "")}" include-domains="input_boolean,switch"></ha-entity-picker>
         </label>
         <label>Name
           <input data-key="name" value="${escapeHtml(c.name ?? "")}" placeholder="Defaults to the entity name">
@@ -1251,7 +1826,21 @@ class ThreeStateSwitchCardEditor extends HTMLElement {
       </div>
     `;
 
+    this.shadowRoot.querySelectorAll("ha-entity-picker[data-key]").forEach((el) => {
+      const includeDomains = {
+        entity: ["input_select", "select"],
+        auto_entity: ["input_boolean", "switch", "binary_sensor"],
+        manual_entity: ["input_boolean", "switch"],
+      }[el.dataset.key];
+      el.hass = this._hass;
+      el.value = this._config?.[el.dataset.key] ?? "";
+      if (includeDomains) el.includeDomains = includeDomains;
+      el.addEventListener("value-changed", (event) => {
+        this._updateConfigValue(el.dataset.key, event.detail?.value ?? "");
+      });
+    });
     this.shadowRoot.querySelectorAll("[data-key]").forEach((el) => {
+      if (el.tagName === "HA-ENTITY-PICKER") return;
       el.addEventListener("change", () => this._updateSimple(el));
       if (el.tagName === "INPUT" && el.type !== "checkbox") {
         el.addEventListener("input", () => this._updateSimple(el, true));
@@ -1268,11 +1857,13 @@ class ThreeStateSwitchCardEditor extends HTMLElement {
     if (element.type === "number") {
       value = value === "" ? "" : Number(value);
     }
-    const next = { ...this._config };
+    this._updateConfigValue(key, value, debounce);
+  }
 
+  _updateConfigValue(key, value, debounce = false) {
+    const next = { ...this._config };
     if (value === "" && !["entity"].includes(key)) delete next[key];
     else next[key] = value;
-
     this._config = next;
     clearTimeout(this._timer);
     const emit = () => fireEvent(this, "config-changed", { config: this._config });

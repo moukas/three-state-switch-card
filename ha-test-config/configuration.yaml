@@ -1,7 +1,7 @@
 lovelace:
   mode: yaml
   resources:
-    - url: /local/three-state-switch-card/three-state-switch-card.js?v=0.1.0-unified-round
+    - url: /local/three-state-switch-card/three-state-switch-card.js?v=0.1.0-minimal-shared-state
       type: module
 
 recorder:
@@ -16,3 +16,17 @@ input_select:
       - "Auto"
       - "Off"
     initial: "Auto"
+
+input_boolean:
+  heating_auto:
+    name: Heating auto mode
+    initial: true
+  heating_manual:
+    name: Heating manual output
+    initial: false
+
+template:
+  - binary_sensor:
+      - name: Heating active
+        unique_id: heating_active
+        state: "{{ is_state('input_boolean.heating_manual', 'on') }}"

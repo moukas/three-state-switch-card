@@ -10,7 +10,8 @@
 6. Reload the Home Assistant frontend. If the old version remains cached, hard refresh the browser.
 
 HACS loads `dist/three-state-switch-card.js`. The filename matches the repository name,
-which matters for HACS validation and release packaging.
+which matters for HACS validation and release packaging. GitHub releases should publish
+the built `three-state-switch-card.js` bundle directly.
 
 ## Manual Installation
 

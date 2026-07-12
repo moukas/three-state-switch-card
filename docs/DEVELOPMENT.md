@@ -37,7 +37,7 @@ Load the resource with a cache-busting query string:
 - Set the GitHub description and topics:
   `home-assistant`, `lovelace`, `hacs`, `custom-card`
 - Enable GitHub Issues
-- Add real screenshots to the README
+- Review README images and screenshots
 - Verify the license and author metadata
 - Run the `Validate` GitHub Actions workflow
 - Create a proper GitHub Release, not only a tag
@@ -55,4 +55,5 @@ git tag v0.1.1
 git push --follow-tags
 ```
 
-The `release.yml` workflow creates a ZIP asset containing the distributable file.
+The `release.yml` workflow publishes the built `dist/three-state-switch-card.js`
+bundle directly as the GitHub Release asset.

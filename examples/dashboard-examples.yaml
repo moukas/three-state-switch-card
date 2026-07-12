@@ -33,7 +33,9 @@ show_labels: true
 
 # Home Assistant recorder-style history timeline
 type: custom:three-state-switch-card
-entity: input_select.heating_mode
+state_entity: binary_sensor.heating_active
+auto_entity: input_boolean.heating_auto
+manual_entity: input_boolean.heating_manual
 orientation: horizontal
 show_history: true
 history_hours: 24

@@ -112,7 +112,7 @@ assert.match(metadata.description, /three-position switch card/i);
 const card = new Card();
 
 assert.throws(() => card.setConfig(), /Card configuration is required/);
-assert.throws(() => card.setConfig({}), /entity field is required/);
+assert.throws(() => card.setConfig({}), /Either entity or state_entity with auto_entity is required/);
 assert.throws(() => card.setConfig({ entity: "light.demo" }), /Only input_select and select entities are supported/);
 assert.throws(() => card.setConfig({ entity: "input_select.demo", variant: "glass" }), /variant must be default or minimal/);
 assert.throws(() => card.setConfig({ entity: "input_select.demo", history_hours: 0 }), /history_hours must be an integer/);
@@ -155,6 +155,33 @@ assert.equal(card._pendingValue, "On");
 assert.equal(timeouts.at(-1)?.delay, 4000);
 assert.equal(bodyEvents.at(-1)?.type, "haptic");
 assert.ok(card.dispatchedEvents.some((event) => event.type === "three-state-change"));
+
+const booleanCard = new Card();
+booleanCard.setConfig({
+  state_entity: "binary_sensor.demo_active",
+  auto_entity: "input_boolean.demo_auto",
+  manual_entity: "input_boolean.demo_manual",
+  optimistic: false,
+});
+booleanCard.hass = {
+  states: {
+    "binary_sensor.demo_active": { state: "off", attributes: { friendly_name: "Demo active" } },
+    "input_boolean.demo_auto": { state: "on", attributes: { friendly_name: "Demo auto" } },
+    "input_boolean.demo_manual": { state: "off", attributes: { friendly_name: "Demo manual" } },
+  },
+  callService: async (...args) => {
+    booleanCard._serviceCalls = [...(booleanCard._serviceCalls || []), args];
+  },
+};
+assert.equal(booleanCard._currentValue(), "Auto");
+await booleanCard._selectIndex(0, booleanCard._options());
+assert.equal(
+  JSON.stringify(booleanCard._serviceCalls),
+  JSON.stringify([
+    ["homeassistant", "turn_off", { entity_id: "input_boolean.demo_auto" }],
+    ["homeassistant", "turn_on", { entity_id: "input_boolean.demo_manual" }],
+  ])
+);
 
 card.hass = {
   states: {
@@ -217,6 +244,120 @@ assert.match(
 );
 assert.ok(animationTargets.includes(".thumb-icon"), "State changes should animate only the thumb icon.");
 assert.ok(!animationTargets.includes(".thumb"), "State changes must not animate the positioned thumb.");
+
+const horizontalCard = new Card();
+horizontalCard.setConfig({ entity: "input_select.demo", orientation: "horizontal" });
+horizontalCard.isConnected = true;
+horizontalCard.shadowRoot = {
+  innerHTML: "",
+  querySelector() {
+    return null;
+  },
+  querySelectorAll() {
+    return [];
+  },
+};
+horizontalCard.hass = {
+  states: {
+    "input_select.demo": {
+      state: "Auto",
+      attributes: { options: ["On", "Auto", "Off"] },
+    },
+  },
+};
+assert.match(horizontalCard.shadowRoot.innerHTML, /class="control-wrap horizontal/);
+assert.match(horizontalCard.shadowRoot.innerHTML, /class="control horizontal/);
+assert.match(horizontalCard.shadowRoot.innerHTML, /class="labels horizontal"/);
+
+const moreInfoCard = new Card();
+moreInfoCard.setConfig({
+  entity: "input_select.demo",
+  actual_state_entity: "binary_sensor.demo_active",
+  history_limit: 2,
+});
+moreInfoCard.isConnected = true;
+let historyActionClick;
+moreInfoCard.shadowRoot = {
+  innerHTML: "",
+  querySelector(selector) {
+    if (selector === ".history-action") {
+      return {
+        addEventListener(type, handler) {
+          if (type === "click") historyActionClick = handler;
+        },
+      };
+    }
+    return null;
+  },
+  querySelectorAll() {
+    return [];
+  },
+};
+const dialogApiCalls = [];
+moreInfoCard.hass = {
+  callApi: async (method, path) => {
+    dialogApiCalls.push({ method, path });
+    if (path.startsWith("history/period/") && path.includes("filter_entity_id=input_select.demo")) {
+      return [[
+        { state: "On", last_changed: "2026-07-10T10:00:00.000Z" },
+        { state: "Auto", last_changed: "2026-07-10T11:00:00.000Z" },
+      ]];
+    }
+    if (path.startsWith("history/period/") && path.includes("filter_entity_id=binary_sensor.demo_active")) {
+      return [[
+        { state: "off", last_changed: "2026-07-10T10:00:00.000Z" },
+        { state: "on", last_changed: "2026-07-10T11:00:00.000Z" },
+      ]];
+    }
+    if (path.startsWith("logbook/")) {
+      return [
+        { name: "Demo Mode", message: "changed to Auto", when: "2026-07-10T11:00:00.000Z" },
+        { name: "Demo Active", message: "turned on", when: "2026-07-10T11:01:00.000Z" },
+      ];
+    }
+    return [];
+  },
+  states: {
+    "input_select.demo": {
+      state: "Auto",
+      attributes: { options: ["On", "Auto", "Off"] },
+    },
+    "binary_sensor.demo_active": {
+      state: "on",
+      attributes: { friendly_name: "Demo active" },
+    },
+  },
+};
+assert.match(moreInfoCard.shadowRoot.innerHTML, /class="history-action"/);
+assert.match(moreInfoCard.shadowRoot.innerHTML, /icon="mdi:chart-line"/);
+historyActionClick?.({ stopPropagation() {} });
+await Promise.resolve();
+await Promise.resolve();
+assert.equal(moreInfoCard._historyDialogOpen, true);
+assert.match(moreInfoCard.shadowRoot.innerHTML, /class="history-dialog-backdrop"/);
+assert.match(moreInfoCard.shadowRoot.innerHTML, /Skutečný stav/);
+assert.match(moreInfoCard.shadowRoot.innerHTML, /Režim řízení/);
+assert.match(moreInfoCard.shadowRoot.innerHTML, /Aktivita/);
+assert.ok(
+  dialogApiCalls.some(
+    (call) => call.method === "GET" &&
+      call.path.startsWith("history/period/") &&
+      call.path.includes("filter_entity_id=input_select.demo")
+  )
+);
+assert.ok(
+  dialogApiCalls.some(
+    (call) => call.method === "GET" &&
+      call.path.startsWith("history/period/") &&
+      call.path.includes("filter_entity_id=binary_sensor.demo_active")
+  )
+);
+assert.ok(dialogApiCalls.some((call) => call.method === "GET" && call.path.startsWith("logbook/")));
+assert.ok(dialogApiCalls.some((call) => call.path.includes("binary_sensor.demo_active")));
+assert.ok(
+  !moreInfoCard.dispatchedEvents.some((event) => event.type === "hass-more-info"),
+  "Clicking the history action must not open the standard entity controls."
+);
 
 const historyCard = new Card();
 historyCard.setConfig({ entity: "input_select.demo", show_history: true, history_limit: 2 });
@@ -312,7 +453,14 @@ assert.match(recorderHistoryCard._renderHistory([
 ]), /class="history-segment"/);
 
 const minimalCard = new Card();
-minimalCard.setConfig({ entity: "input_select.demo", variant: "minimal", orientation: "horizontal", show_history: true });
+minimalCard.setConfig({
+  state_entity: "binary_sensor.demo_active",
+  auto_entity: "input_boolean.demo_auto",
+  manual_entity: "input_boolean.demo_manual",
+  variant: "minimal",
+  orientation: "horizontal",
+  show_history: true,
+});
 minimalCard.isConnected = true;
 let minimalSummaryClick;
 minimalCard.shadowRoot = {
@@ -333,9 +481,17 @@ minimalCard.shadowRoot = {
 };
 minimalCard.hass = {
   states: {
-    "input_select.demo": {
-      state: "Auto",
-      attributes: { options: ["On", "Auto", "Off"], icon: "mdi:fridge" },
+    "binary_sensor.demo_active": {
+      state: "on",
+      attributes: { friendly_name: "Demo active", icon: "mdi:fridge" },
+    },
+    "input_boolean.demo_auto": {
+      state: "off",
+      attributes: { friendly_name: "Demo auto" },
+    },
+    "input_boolean.demo_manual": {
+      state: "on",
+      attributes: { friendly_name: "Demo manual" },
     },
   },
 };
@@ -345,6 +501,7 @@ assert.match(minimalCard.shadowRoot.innerHTML, /class="minimal-row"/);
 assert.match(minimalCard.shadowRoot.innerHTML, /class="minimal-summary"/);
 assert.match(minimalCard.shadowRoot.innerHTML, /class="minimal-state-icon"/);
 assert.match(minimalCard.shadowRoot.innerHTML, /icon="mdi:fridge"/);
+assert.equal(minimalCard._currentValue(), "On");
 assert.match(minimalCard.shadowRoot.innerHTML, /class="control horizontal inline"/);
 assert.doesNotMatch(minimalCard.shadowRoot.innerHTML, /class="labels horizontal"/);
 assert.doesNotMatch(minimalCard.shadowRoot.innerHTML, /class="history"/);
@@ -354,8 +511,9 @@ minimalSummaryClick?.({ stopPropagation() {} });
 assert.equal(minimalCard._dialogOpen, true);
 minimalCard._render();
 assert.match(minimalCard.shadowRoot.innerHTML, /class="dialog-backdrop"/);
-assert.match(minimalCard.shadowRoot.innerHTML, /class="control vertical dialog"/);
-assert.match(minimalCard.shadowRoot.innerHTML, /class="labels vertical"/);
+assert.match(minimalCard.shadowRoot.innerHTML, /class="control-wrap horizontal dialog-control/);
+assert.match(minimalCard.shadowRoot.innerHTML, /class="control horizontal dialog"/);
+assert.match(minimalCard.shadowRoot.innerHTML, /class="labels horizontal"/);
 
 const failingCard = new Card();
 failingCard.setConfig({ entity: "select.demo", optimistic: true, haptic: false });
