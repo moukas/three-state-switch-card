@@ -36,6 +36,7 @@ Load the resource with a cache-busting query string:
 - Set the GitHub description and topics:
   `home-assistant`, `lovelace`, `hacs`, `custom-card`
 - Enable GitHub Issues
+- Enable GitHub Pages with `Settings -> Pages -> Source: GitHub Actions`
 - Review README images and screenshots
 - Verify the license and author metadata
 - Run the `Validate` GitHub Actions workflow
