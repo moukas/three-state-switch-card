@@ -33,7 +33,6 @@ Load the resource with a cache-busting query string:
 
 ## Before Publishing
 
-- Set the final repository URL in `documentationURL`
 - Set the GitHub description and topics:
   `home-assistant`, `lovelace`, `hacs`, `custom-card`
 - Enable GitHub Issues

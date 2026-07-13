@@ -3,9 +3,13 @@
 A polished three-position Home Assistant Lovelace card for `input_select` and `select`
 entities that expose exactly three options, typically **On / Auto / Off**.
 
-![Card icon](docs/card-icon.svg)
+![Three State Switch Card in Home Assistant](docs/design-reference.png)
 
-![Design reference](docs/design-reference.png)
+The screenshot above is captured from the included Home Assistant test dashboard.
+It shows the compact minimal card in its real Home Assistant rendering.
+
+Try the interactive [live demo](https://moukas.github.io/three-state-switch-card/).
+It simulates Home Assistant state changes in the browser and never controls real devices.
 
 ## Features
 
@@ -54,7 +58,5 @@ Version `0.1.0` is aligned for a HACS custom repository workflow:
 - HACS metadata is present in `hacs.json`.
 - Validation CI is configured with `hacs/action` for `category: plugin`.
 - Release CI publishes the built `dist/three-state-switch-card.js` bundle.
-- Card picker metadata is registered through `window.customCards`.
-
-One publish-time value is still environment-specific: set the final GitHub repository
-URL in `documentationURL` once the public repository location is known.
+- Card picker metadata is registered through `window.customCards`, including this
+  repository's documentation URL.

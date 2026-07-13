@@ -117,6 +117,10 @@ assert.throws(() => card.setConfig({ entity: "light.demo" }), /Only input_select
 assert.throws(() => card.setConfig({ entity: "input_select.demo", variant: "glass" }), /variant must be default or minimal/);
 assert.throws(() => card.setConfig({ entity: "input_select.demo", history_hours: 0 }), /history_hours must be an integer/);
 assert.throws(
+  () => card.setConfig({ entity: "input_select.demo", dialog_orientation: "diagonal" }),
+  /dialog_orientation must be vertical or horizontal/
+);
+assert.throws(
   () => card.setConfig({ entity: "input_select.demo", options: [{ value: "1" }, { value: "2" }] }),
   /options must contain exactly three items/
 );
@@ -182,6 +186,22 @@ assert.equal(
     ["homeassistant", "turn_on", { entity_id: "input_boolean.demo_manual" }],
   ])
 );
+
+const booleanLabelsCard = new Card();
+booleanLabelsCard.setConfig({
+  state_entity: "binary_sensor.demo_active",
+  auto_entity: "input_boolean.demo_auto",
+  manual_entity: "input_boolean.demo_manual",
+  options: [
+    { value: "Zapnuto", label: "Zapnuto", icon: "mdi:lightbulb-on", color: "#44aa44" },
+    { value: "Automatika", label: "Automatika", icon: "mdi:autorenew", color: "#03a9f4" },
+    { value: "Vypnuto", label: "Vypnuto", icon: "mdi:lightbulb-off", color: "#777777" },
+  ],
+});
+const booleanLabels = booleanLabelsCard._options();
+assert.equal(JSON.stringify(booleanLabels.map((option) => option.value)), JSON.stringify(["On", "Auto", "Off"]));
+assert.equal(JSON.stringify(booleanLabels.map((option) => option.label)), JSON.stringify(["Zapnuto", "Automatika", "Vypnuto"]));
+assert.equal(booleanLabels[0].icon, "mdi:lightbulb-on");
 
 card.hass = {
   states: {
@@ -463,6 +483,7 @@ minimalCard.setConfig({
 });
 minimalCard.isConnected = true;
 let minimalSummaryClick;
+let minimalDialogHistoryClick;
 minimalCard.shadowRoot = {
   innerHTML: "",
   querySelector(selector) {
@@ -470,6 +491,13 @@ minimalCard.shadowRoot = {
       return {
         addEventListener(type, handler) {
           if (type === "click") minimalSummaryClick = handler;
+        },
+      };
+    }
+    if (selector === ".dialog-history-action") {
+      return {
+        addEventListener(type, handler) {
+          if (type === "click") minimalDialogHistoryClick = handler;
         },
       };
     }
@@ -511,9 +539,38 @@ minimalSummaryClick?.({ stopPropagation() {} });
 assert.equal(minimalCard._dialogOpen, true);
 minimalCard._render();
 assert.match(minimalCard.shadowRoot.innerHTML, /class="dialog-backdrop"/);
-assert.match(minimalCard.shadowRoot.innerHTML, /class="control-wrap horizontal dialog-control/);
-assert.match(minimalCard.shadowRoot.innerHTML, /class="control horizontal dialog"/);
-assert.match(minimalCard.shadowRoot.innerHTML, /class="labels horizontal"/);
+assert.match(minimalCard.shadowRoot.innerHTML, /class="dialog-history-action"/);
+assert.match(minimalCard.shadowRoot.innerHTML, /icon="mdi:chart-line"/);
+assert.match(minimalCard.shadowRoot.innerHTML, /class="control-wrap vertical dialog-control/);
+assert.match(minimalCard.shadowRoot.innerHTML, /class="control vertical dialog"/);
+assert.match(minimalCard.shadowRoot.innerHTML, /class="labels vertical"/);
+minimalDialogHistoryClick?.({ stopPropagation() {} });
+assert.equal(minimalCard._dialogOpen, false);
+assert.equal(minimalCard._historyDialogOpen, true);
+assert.match(minimalCard.shadowRoot.innerHTML, /class="history-dialog-backdrop"/);
+
+const horizontalDialogCard = new Card();
+horizontalDialogCard.setConfig({
+  state_entity: "binary_sensor.demo_active",
+  auto_entity: "input_boolean.demo_auto",
+  variant: "minimal",
+  dialog_orientation: "horizontal",
+});
+horizontalDialogCard.isConnected = true;
+horizontalDialogCard._dialogOpen = true;
+horizontalDialogCard.shadowRoot = {
+  innerHTML: "",
+  querySelector() {
+    return null;
+  },
+  querySelectorAll() {
+    return [];
+  },
+};
+horizontalDialogCard.hass = minimalCard._hass;
+horizontalDialogCard._render();
+assert.match(horizontalDialogCard.shadowRoot.innerHTML, /class="control-wrap horizontal dialog-control/);
+assert.match(horizontalDialogCard.shadowRoot.innerHTML, /class="control horizontal dialog"/);
 
 const failingCard = new Card();
 failingCard.setConfig({ entity: "select.demo", optimistic: true, haptic: false });
@@ -586,5 +643,18 @@ const editor = new Editor();
 editor.setConfig({ entity: "input_select.demo", variant: "minimal" });
 assert.match(editor.shadowRoot.innerHTML, /<select data-key="variant">/);
 assert.match(editor.shadowRoot.innerHTML, />Minimal</);
+assert.match(editor.shadowRoot.innerHTML, /data-key="dialog_orientation"/);
+assert.match(editor.shadowRoot.innerHTML, /Expanded minimal dialog orientation/);
+
+const booleanEditor = new Editor();
+booleanEditor.setConfig({
+  state_entity: "binary_sensor.demo_active",
+  auto_entity: "input_boolean.demo_auto",
+  options: [{ label: "Zapnuto" }, { label: "Automatika" }, { label: "Vypnuto" }],
+});
+assert.match(booleanEditor.shadowRoot.innerHTML, /State labels, icons, and colors/);
+assert.match(booleanEditor.shadowRoot.innerHTML, /fixed internal values On, Auto, and Off/);
+assert.match(booleanEditor.shadowRoot.innerHTML, /value="On"\s+disabled/);
+assert.match(booleanEditor.shadowRoot.innerHTML, /value="Zapnuto"/);
 
 console.log("Behavioral checks passed.");

@@ -22,6 +22,7 @@ uses the first three values from the entity `options` attribute.
 | `subtitle` | string | active label | Text shown below the title |
 | `variant` | string | `default` | `default` or `minimal` |
 | `orientation` | string | `vertical` | `vertical` or `horizontal` |
+| `dialog_orientation` | string | `vertical` | Expanded modal orientation for `variant: minimal` |
 | `reverse` | boolean | `false` | Reverses the state order |
 | `show_name` | boolean | `true` | Shows the title |
 | `show_subtitle` | boolean | `true` | Shows the subtitle |
@@ -52,6 +53,11 @@ options:
 - `label` is the text shown to the user.
 - `icon` is a Material Design Icons identifier.
 - `color` can be any valid CSS color or CSS variable.
+
+For the boolean model (`state_entity` + `auto_entity`), the three internal
+`value` entries are fixed as `On`, `Auto`, and `Off` because they drive the
+control logic. You can still customize the visible `label`, `icon`, and `color`
+for each state in the card editor or YAML.
 
 ## Example for `input_select`
 
@@ -112,12 +118,15 @@ type: custom:three-state-switch-card
 entity: input_select.heating_mode
 variant: minimal
 orientation: vertical
+dialog_orientation: vertical
 ```
 
 The minimal variant renders as a compact row with the current icon, entity name, and
 a small inline three-state switch. The icon is taken from the entity icon when
 available. Clicking the icon or name opens a modal with the card's animated
-vertical switch.
+switch. The expanded modal uses `dialog_orientation`, which defaults to
+`vertical`; set it to `horizontal` if you want the enlarged minimal switch to open
+sideways. The expanded modal includes the same history icon as the default card.
 
 ## History Timeline
 

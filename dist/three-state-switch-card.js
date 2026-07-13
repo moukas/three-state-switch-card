@@ -18,6 +18,7 @@ const DEFAULTS = Object.freeze({
   subtitle: "",
   variant: "default",
   orientation: "vertical",
+  dialog_orientation: "vertical",
   reverse: false,
   show_name: true,
   show_subtitle: true,
@@ -214,12 +215,18 @@ function canWriteBooleanEntity(entityId) {
 }
 
 function booleanModelOptions(config) {
-  const labels = config.options?.length === 3 ? config.options : [
+  const defaults = [
     { value: "On", label: "On", icon: "mdi:power", color: "#43a047" },
     { value: "Auto", label: "Auto", icon: "mdi:autorenew", color: "#03a9f4" },
     { value: "Off", label: "Off", icon: "mdi:power-off", color: "#757575" },
   ];
-  return labels.map(normalizeOption);
+  const custom = Array.isArray(config.options) ? config.options : [];
+  return defaults.map((base, index) => normalizeOption({
+    value: base.value,
+    label: custom[index]?.label ?? custom[index]?.value ?? base.label,
+    icon: custom[index]?.icon ?? base.icon,
+    color: custom[index]?.color ?? base.color,
+  }));
 }
 
 function historyRowState(row) {
@@ -296,6 +303,9 @@ class ThreeStateSwitchCard extends HTMLElement {
     }
     if (!["vertical", "horizontal"].includes(merged.orientation)) {
       throw new Error("orientation must be vertical or horizontal.");
+    }
+    if (!["vertical", "horizontal"].includes(merged.dialog_orientation)) {
+      throw new Error("dialog_orientation must be vertical or horizontal.");
     }
     if (!["tap", "tap-drag"].includes(merged.interaction)) {
       throw new Error("interaction must be tap or tap-drag.");
@@ -448,7 +458,7 @@ class ThreeStateSwitchCard extends HTMLElement {
           : this._renderDefault(name, subtitle, current, currentIndex, options, disabled)}
 
         ${this._config.show_history && !isMinimal ? this._renderHistory(options) : ""}
-        ${this._historyDialogOpen && !isMinimal ? this._renderHistoryDialog(name, options) : ""}
+        ${this._historyDialogOpen ? this._renderHistoryDialog(name, options) : ""}
         ${this._pendingValue ? `<div class="pending" aria-live="polite">Saving...</div>` : ""}
       </ha-card>
     `;
@@ -483,7 +493,7 @@ class ThreeStateSwitchCard extends HTMLElement {
 
   _renderMinimal(name, icon, current, currentIndex, options, disabled) {
     const accent = escapeHtml(current.color || "var(--primary-color)");
-    const dialogOrientation = this._config.orientation;
+    const dialogOrientation = this._config.dialog_orientation || DEFAULTS.dialog_orientation;
     return `
       <div class="minimal-row" style="--state-accent:${accent}">
         <button
@@ -505,6 +515,9 @@ class ThreeStateSwitchCard extends HTMLElement {
             <div class="dialog-header">
               <ha-icon class="dialog-entity-icon" icon="${escapeHtml(icon)}"></ha-icon>
               <div class="dialog-title">${escapeHtml(name)}</div>
+              <button class="dialog-history-action" type="button" aria-label="Show entity history" title="Show history">
+                <ha-icon icon="mdi:chart-line"></ha-icon>
+              </button>
               <button class="dialog-close" type="button" aria-label="Close">
                 <ha-icon icon="mdi:close"></ha-icon>
               </button>
@@ -945,11 +958,18 @@ class ThreeStateSwitchCard extends HTMLElement {
     const dialogBackdrop = this.shadowRoot.querySelector(".dialog-backdrop");
     const dialogClose = this.shadowRoot.querySelector(".dialog-close");
     const historyAction = this.shadowRoot.querySelector(".history-action");
+    const dialogHistoryAction = this.shadowRoot.querySelector(".dialog-history-action");
     const historyDialogBackdrop = this.shadowRoot.querySelector(".history-dialog-backdrop");
     const historyDialogClose = this.shadowRoot.querySelector(".history-dialog-close");
 
     historyAction?.addEventListener("click", (event) => {
       event.stopPropagation();
+      this._openHistoryDialog(options);
+    });
+
+    dialogHistoryAction?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this._dialogOpen = false;
       this._openHistoryDialog(options);
     });
 
@@ -1613,7 +1633,7 @@ class ThreeStateSwitchCard extends HTMLElement {
       }
       .dialog-header {
         display: grid;
-        grid-template-columns: 34px minmax(0, 1fr) 36px;
+        grid-template-columns: 34px minmax(0, 1fr) 36px 36px;
         align-items: center;
         gap: 10px;
       }
@@ -1629,6 +1649,7 @@ class ThreeStateSwitchCard extends HTMLElement {
         font-size: 18px;
         font-weight: 600;
       }
+      .dialog-history-action,
       .dialog-close {
         appearance: none;
         border: 0;
@@ -1642,8 +1663,13 @@ class ThreeStateSwitchCard extends HTMLElement {
         color: var(--secondary-text-color);
         cursor: pointer;
       }
+      .dialog-history-action:active,
       .dialog-close:active {
         background: var(--secondary-background-color, rgba(127,127,127,.16));
+      }
+      .dialog-history-action ha-icon,
+      .dialog-close ha-icon {
+        --mdc-icon-size: 22px;
       }
       .dialog-control {
         justify-content: center;
@@ -1723,6 +1749,10 @@ class ThreeStateSwitchCardEditor extends HTMLElement {
   _render() {
     if (!this.shadowRoot) return;
     const c = this._config ?? {};
+    const isBooleanConfig = Boolean(c.state_entity && c.auto_entity);
+    const editorOptions = isBooleanConfig
+      ? booleanModelOptions(c)
+      : [0, 1, 2].map((i) => normalizeOption(c.options?.[i] ?? {}, i));
     this.shadowRoot.innerHTML = `
       <style>
         :host { display:block; }
@@ -1772,6 +1802,12 @@ class ThreeStateSwitchCardEditor extends HTMLElement {
             <option value="horizontal" ${c.orientation === "horizontal" ? "selected" : ""}>Horizontal</option>
           </select>
         </label>
+        <label>Expanded minimal dialog orientation
+          <select data-key="dialog_orientation">
+            <option value="vertical" ${c.dialog_orientation !== "horizontal" ? "selected" : ""}>Vertical</option>
+            <option value="horizontal" ${c.dialog_orientation === "horizontal" ? "selected" : ""}>Horizontal</option>
+          </select>
+        </label>
         <label>Interaction
           <select data-key="interaction">
             <option value="tap-drag" ${c.interaction !== "tap" ? "selected" : ""}>Tap and drag</option>
@@ -1803,13 +1839,21 @@ class ThreeStateSwitchCardEditor extends HTMLElement {
           <input data-key="history_limit" type="number" min="1" max="20" step="1" value="${escapeHtml(c.history_limit ?? 5)}">
         </label>
         <details>
-          <summary>Custom values and labels</summary>
-          <p class="hint">Leave these empty to load the first three entity options automatically.</p>
+          <summary>State labels, icons, and colors</summary>
+          <p class="hint">${
+            isBooleanConfig
+              ? "Boolean mode uses fixed internal values On, Auto, and Off. Edit labels, icons, and colors only."
+              : "Leave these empty to load the first three entity options automatically."
+          }</p>
           ${[0,1,2].map((i) => {
-            const option = normalizeOption(c.options?.[i] ?? {}, i);
+            const option = editorOptions[i];
             return `
               <label>Value ${i + 1}
-                <input data-option="${i}" data-field="value" value="${escapeHtml(option.value)}">
+                <input
+                  ${isBooleanConfig ? "" : `data-option="${i}" data-field="value"`}
+                  value="${escapeHtml(option.value)}"
+                  ${isBooleanConfig ? "disabled" : ""}
+                >
               </label>
               <label>Label ${i + 1}
                 <input data-option="${i}" data-field="label" value="${escapeHtml(option.label)}">
@@ -1874,9 +1918,14 @@ class ThreeStateSwitchCardEditor extends HTMLElement {
   _updateOption(element) {
     const index = Number(element.dataset.option);
     const field = element.dataset.field;
-    const options = [0, 1, 2].map((i) => normalizeOption(this._config.options?.[i] ?? {}, i));
+    if (!Number.isInteger(index) || !field) return;
+    const isBooleanConfig = booleanModel(this._config);
+    if (isBooleanConfig && field === "value") return;
+    const options = isBooleanConfig
+      ? booleanModelOptions(this._config)
+      : [0, 1, 2].map((i) => normalizeOption(this._config.options?.[i] ?? {}, i));
     options[index][field] = element.value;
-    const anyValue = options.some((item) => item.value);
+    const anyValue = isBooleanConfig || options.some((item) => item.value);
     const next = { ...this._config };
     if (anyValue) next.options = options;
     else delete next.options;
@@ -1895,7 +1944,7 @@ if (!window.customCards.some((card) => card.type === CARD_TAG)) {
     name: "Three State Switch Card",
     description: "A polished three-position switch card for input_select and select entities.",
     preview: true,
-    documentationURL: "",
+    documentationURL: "https://github.com/moukas/three-state-switch-card",
     getEntitySuggestion: (hass, entityId) => {
       if (!SUPPORTED_DOMAINS.has(domainOf(entityId))) return null;
       const count = hass?.states?.[entityId]?.attributes?.options?.length;
