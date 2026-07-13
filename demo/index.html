@@ -94,6 +94,11 @@
         subtitle: "Choose operating mode",
         orientation: "vertical",
         show_history: true,
+        options: [
+          { value: "On", label: "On", icon: "mdi:power", color: "#43a047" },
+          { value: "Auto", label: "Auto", icon: "mdi:autorenew", color: "#03a9f4" },
+          { value: "Off", label: "Off", icon: "mdi:power-off", color: "#757575" },
+        ],
       });
       cards[1].setConfig({
         entity: "input_select.heating_mode",
@@ -101,6 +106,11 @@
         variant: "minimal",
         orientation: "horizontal",
         compact: true,
+        options: [
+          { value: "On", label: "On", icon: "mdi:power", color: "#43a047" },
+          { value: "Auto", label: "Auto", icon: "mdi:autorenew", color: "#03a9f4" },
+          { value: "Off", label: "Off", icon: "mdi:power-off", color: "#757575" },
+        ],
       });
       cards.forEach((card) => { card.hass = hass; });
     </script>
