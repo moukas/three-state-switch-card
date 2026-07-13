@@ -17,7 +17,7 @@ jobs:
         with:
           node-version: "22"
       - run: npm test
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: dist/three-state-switch-card.js
           generate_release_notes: true
