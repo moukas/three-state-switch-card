@@ -4,7 +4,7 @@
  *
  * @license MIT
  */
-const CARD_VERSION = "0.1.0";
+const CARD_VERSION = "0.1.3";
 const CARD_TAG = "three-state-switch-card";
 const EDITOR_TAG = "three-state-switch-card-editor";
 const SUPPORTED_DOMAINS = new Set(["input_select", "select"]);
@@ -127,6 +127,9 @@ function entityIcon(config, stateObj) {
 
 function haptic(type = "selection") {
   fireEvent(document.body, "haptic", type);
+  try {
+    globalThis.navigator?.vibrate?.(type === "success" ? [12, 36, 12] : 12);
+  } catch (_) {}
 }
 
 function formatHistoryTime(date) {
@@ -436,7 +439,9 @@ class ThreeStateSwitchCard extends HTMLElement {
     const options = this._options();
     const invalidOptions = options.length !== 3;
     const currentValue = this._pendingValue || this._currentValue();
-    const currentIndex = this._resolveCurrentIndex(options, currentValue);
+    const currentIndex = Number.isInteger(this._pointer?.index)
+      ? this._pointer.index
+      : this._resolveCurrentIndex(options, currentValue);
     const current = options[currentIndex] ?? { value: "", label: "Unknown state", icon: "mdi:help" };
     const disabled = Boolean(this._config.disabled || unavailable || invalidOptions);
     const name = displayName(this._hass, this._config, stateObj);
@@ -991,6 +996,12 @@ class ThreeStateSwitchCard extends HTMLElement {
       this._queueRender();
     });
 
+    const preventBackdropScroll = (event) => {
+      if (event.target !== dialogBackdrop || !event.cancelable) return;
+      event.preventDefault();
+    };
+    dialogBackdrop?.addEventListener("touchmove", preventBackdropScroll, { passive: false });
+
     historyDialogClose?.addEventListener("click", (event) => {
       event.stopPropagation();
       this._historyDialogOpen = false;
@@ -1032,23 +1043,29 @@ class ThreeStateSwitchCard extends HTMLElement {
     controls.forEach((control) => {
       control.addEventListener("pointerdown", (event) => {
         if (event.pointerType === "mouse" && event.button !== 0) return;
+        if (event.cancelable) event.preventDefault();
+        event.stopPropagation();
         control.setPointerCapture?.(event.pointerId);
         this._pointer = { id: event.pointerId };
         this._previewPointer(event, control);
-      });
+      }, { passive: false });
 
       control.addEventListener("pointermove", (event) => {
         if (this._pointer?.id !== event.pointerId) return;
+        if (event.cancelable) event.preventDefault();
+        event.stopPropagation();
         this._previewPointer(event, control);
-      });
+      }, { passive: false });
 
       const finish = (event) => {
         if (this._pointer?.id !== event.pointerId) return;
+        if (event.cancelable) event.preventDefault();
+        event.stopPropagation();
         const index = this._pointer.index;
         this._pointer = null;
         if (Number.isInteger(index)) this._selectIndex(index, options);
       };
-      control.addEventListener("pointerup", finish);
+      control.addEventListener("pointerup", finish, { passive: false });
       control.addEventListener("pointercancel", () => {
         this._pointer = null;
         this._queueRender();
@@ -1062,8 +1079,13 @@ class ThreeStateSwitchCard extends HTMLElement {
       ? (event.clientX - rect.left) / rect.width
       : (event.clientY - rect.top) / rect.height;
     const index = Math.max(0, Math.min(2, Math.floor(ratio * 3)));
+    const changed = this._pointer.index !== index;
     this._pointer.index = index;
+    this.shadowRoot.querySelectorAll(".control").forEach((activeControl) => {
+      activeControl.dataset.index = String(index);
+    });
     control.dataset.index = String(index);
+    if (changed) this._queueRender();
   }
 
   async _selectIndex(index, options) {
@@ -1218,6 +1240,7 @@ class ThreeStateSwitchCard extends HTMLElement {
         position: relative;
         outline: none;
         user-select: none;
+        touch-action: none;
         -webkit-tap-highlight-color: transparent;
       }
       .control.vertical { width: 116px; height: 290px; }
@@ -1618,6 +1641,8 @@ class ThreeStateSwitchCard extends HTMLElement {
         place-items: center;
         padding: 24px;
         background: rgba(0,0,0,.45);
+        touch-action: none;
+        overscroll-behavior: contain;
       }
       .switch-dialog {
         width: min(320px, 100%);
@@ -1630,6 +1655,7 @@ class ThreeStateSwitchCard extends HTMLElement {
         background: var(--ha-card-background, var(--card-background-color, #fff));
         color: var(--primary-text-color);
         box-shadow: 0 16px 42px rgba(0,0,0,.34);
+        overscroll-behavior: contain;
       }
       .dialog-header {
         display: grid;

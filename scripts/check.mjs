@@ -288,6 +288,14 @@ horizontalCard.hass = {
 assert.match(horizontalCard.shadowRoot.innerHTML, /class="control-wrap horizontal/);
 assert.match(horizontalCard.shadowRoot.innerHTML, /class="control horizontal/);
 assert.match(horizontalCard.shadowRoot.innerHTML, /class="labels horizontal"/);
+horizontalCard._pointer = { id: 7, index: 0 };
+horizontalCard._render();
+assert.match(
+  horizontalCard.shadowRoot.innerHTML,
+  /class="control horizontal "[\s\S]*?data-index="0"/,
+  "An active drag must retain its preview position during a render."
+);
+horizontalCard._pointer = null;
 
 const moreInfoCard = new Card();
 moreInfoCard.setConfig({
