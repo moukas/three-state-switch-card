@@ -2,6 +2,12 @@
 type: custom:three-state-switch-card
 entity: input_select.heating_mode
 
+# In Auto, show the real device state in the subtitle (Auto · Zapnuto/Vypnuto)
+actual_state_entity: binary_sensor.heating_active
+actual_state_on_label: Zapnuto
+actual_state_off_label: Vypnuto
+auto_active_color: "#fbc02d"
+
 # Full vertical configuration
 type: custom:three-state-switch-card
 entity: input_select.heating_mode

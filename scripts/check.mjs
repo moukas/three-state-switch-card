@@ -85,6 +85,10 @@ const context = {
   queueMicrotask(fn) {
     fn();
   },
+  requestAnimationFrame(fn) {
+    fn();
+    return 1;
+  },
   setTimeout(fn, delay) {
     const handle = { fn, delay };
     timeouts.push(handle);
@@ -187,6 +191,43 @@ assert.equal(
   ])
 );
 
+const minimalAutoActiveCard = new Card();
+minimalAutoActiveCard.setConfig({
+  state_entity: "binary_sensor.demo_active",
+  auto_entity: "input_boolean.demo_auto",
+  manual_entity: "input_boolean.demo_manual",
+  variant: "minimal",
+});
+minimalAutoActiveCard.isConnected = true;
+minimalAutoActiveCard.shadowRoot = {
+  innerHTML: "",
+  querySelector() { return null; },
+  querySelectorAll() { return []; },
+};
+minimalAutoActiveCard.hass = {
+  states: {
+    "binary_sensor.demo_active": { state: "on", attributes: {} },
+    "input_boolean.demo_auto": { state: "on", attributes: {} },
+    "input_boolean.demo_manual": { state: "off", attributes: {} },
+  },
+};
+assert.match(
+  minimalAutoActiveCard.shadowRoot.innerHTML,
+  /minimal-row" style="--state-accent:#03a9f4"/,
+  "Minimal row background and icon must retain the Auto color."
+);
+assert.match(
+  minimalAutoActiveCard.shadowRoot.innerHTML,
+  /thumb" style="--active-color:#fbc02d"/,
+  "Only the minimal switch thumb must use the Auto-active color."
+);
+minimalAutoActiveCard._hass.states["input_boolean.demo_auto"].state = "off";
+assert.equal(
+  minimalAutoActiveCard._activeColor(minimalAutoActiveCard._options()[1]),
+  "#03a9f4",
+  "The Auto-active color must wait until auto mode is confirmed."
+);
+
 const booleanLabelsCard = new Card();
 booleanLabelsCard.setConfig({
   state_entity: "binary_sensor.demo_active",
@@ -202,6 +243,48 @@ const booleanLabels = booleanLabelsCard._options();
 assert.equal(JSON.stringify(booleanLabels.map((option) => option.value)), JSON.stringify(["On", "Auto", "Off"]));
 assert.equal(JSON.stringify(booleanLabels.map((option) => option.label)), JSON.stringify(["Zapnuto", "Automatika", "Vypnuto"]));
 assert.equal(booleanLabels[0].icon, "mdi:lightbulb-on");
+
+const pendingOriginCard = new Card();
+pendingOriginCard.setConfig({
+  state_entity: "binary_sensor.demo_active",
+  auto_entity: "input_boolean.demo_auto",
+  manual_entity: "input_boolean.demo_manual",
+});
+pendingOriginCard.hass = {
+  states: {
+    "binary_sensor.demo_active": { state: "on", attributes: {} },
+    "input_boolean.demo_auto": { state: "off", attributes: {} },
+    "input_boolean.demo_manual": { state: "off", attributes: {} },
+  },
+  callService: async () => {},
+};
+pendingOriginCard._pendingValue = "Off";
+await pendingOriginCard._selectIndex(1, pendingOriginCard._options());
+assert.equal(
+  JSON.stringify(pendingOriginCard._pendingAnimation),
+  JSON.stringify({ from: 2, to: 1 }),
+  "Off to Auto must animate from the visibly pending Off position even when the actual state is on."
+);
+
+const autoIndicatorCard = new Card();
+autoIndicatorCard.setConfig({
+  entity: "input_select.demo",
+  actual_state_entity: "binary_sensor.demo_active",
+});
+autoIndicatorCard.hass = {
+  states: {
+    "input_select.demo": { state: "Auto", attributes: { options: ["On", "Auto", "Off"] } },
+    "binary_sensor.demo_active": { state: "on", attributes: {} },
+  },
+};
+assert.equal(autoIndicatorCard._subtitle(autoIndicatorCard._options()[1]), "Auto · On");
+assert.equal(autoIndicatorCard._activeColor(autoIndicatorCard._options()[1]), "#fbc02d");
+autoIndicatorCard._hass.states["binary_sensor.demo_active"].state = "off";
+assert.equal(autoIndicatorCard._subtitle(autoIndicatorCard._options()[1]), "Auto · Off");
+assert.equal(autoIndicatorCard._activeColor(autoIndicatorCard._options()[1]), "");
+assert.equal(autoIndicatorCard._subtitle(autoIndicatorCard._options()[0]), "On");
+autoIndicatorCard._config.show_auto_state = false;
+assert.equal(autoIndicatorCard._subtitle(autoIndicatorCard._options()[1]), "Auto");
 
 card.hass = {
   states: {
@@ -234,6 +317,21 @@ assert.equal(
 
 card.isConnected = true;
 const animationTargets = [];
+const thumbStyle = {
+  transition: "",
+  transform: "",
+  removeProperty(name) {
+    this[name] = "";
+  },
+};
+const animatedThumb = {
+  style: thumbStyle,
+  offsetWidth: 100,
+  closest() {
+    return { classList: { contains: (name) => name === "vertical" } };
+  },
+  addEventListener() {},
+};
 card.shadowRoot = {
   innerHTML: "",
   querySelector(selector) {
@@ -244,8 +342,8 @@ card.shadowRoot = {
       },
     };
   },
-  querySelectorAll() {
-    return [];
+  querySelectorAll(selector) {
+    return selector === ".thumb" ? [animatedThumb] : [];
   },
 };
 card._render();
@@ -256,6 +354,7 @@ assert.match(
 );
 
 card._pendingValue = "Off";
+card._pendingAnimation = { from: 0, to: 2 };
 card._render();
 assert.match(
   card.shadowRoot.innerHTML,
@@ -264,6 +363,8 @@ assert.match(
 );
 assert.ok(animationTargets.includes(".thumb-icon"), "State changes should animate only the thumb icon.");
 assert.ok(!animationTargets.includes(".thumb"), "State changes must not animate the positioned thumb.");
+assert.equal(thumbStyle.transform, "translateY(200%)");
+assert.equal(JSON.stringify(card._pendingAnimation), JSON.stringify({ from: 0, to: 2 }));
 
 const horizontalCard = new Card();
 horizontalCard.setConfig({ entity: "input_select.demo", orientation: "horizontal" });
