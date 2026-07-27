@@ -85,6 +85,10 @@ const context = {
   queueMicrotask(fn) {
     fn();
   },
+  requestAnimationFrame(fn) {
+    fn();
+    return 1;
+  },
   setTimeout(fn, delay) {
     const handle = { fn, delay };
     timeouts.push(handle);
@@ -240,6 +244,28 @@ assert.equal(JSON.stringify(booleanLabels.map((option) => option.value)), JSON.s
 assert.equal(JSON.stringify(booleanLabels.map((option) => option.label)), JSON.stringify(["Zapnuto", "Automatika", "Vypnuto"]));
 assert.equal(booleanLabels[0].icon, "mdi:lightbulb-on");
 
+const pendingOriginCard = new Card();
+pendingOriginCard.setConfig({
+  state_entity: "binary_sensor.demo_active",
+  auto_entity: "input_boolean.demo_auto",
+  manual_entity: "input_boolean.demo_manual",
+});
+pendingOriginCard.hass = {
+  states: {
+    "binary_sensor.demo_active": { state: "on", attributes: {} },
+    "input_boolean.demo_auto": { state: "off", attributes: {} },
+    "input_boolean.demo_manual": { state: "off", attributes: {} },
+  },
+  callService: async () => {},
+};
+pendingOriginCard._pendingValue = "Off";
+await pendingOriginCard._selectIndex(1, pendingOriginCard._options());
+assert.equal(
+  JSON.stringify(pendingOriginCard._pendingAnimation),
+  JSON.stringify({ from: 2, to: 1 }),
+  "Off to Auto must animate from the visibly pending Off position even when the actual state is on."
+);
+
 const autoIndicatorCard = new Card();
 autoIndicatorCard.setConfig({
   entity: "input_select.demo",
@@ -291,6 +317,21 @@ assert.equal(
 
 card.isConnected = true;
 const animationTargets = [];
+const thumbStyle = {
+  transition: "",
+  transform: "",
+  removeProperty(name) {
+    this[name] = "";
+  },
+};
+const animatedThumb = {
+  style: thumbStyle,
+  offsetWidth: 100,
+  closest() {
+    return { classList: { contains: (name) => name === "vertical" } };
+  },
+  addEventListener() {},
+};
 card.shadowRoot = {
   innerHTML: "",
   querySelector(selector) {
@@ -301,8 +342,8 @@ card.shadowRoot = {
       },
     };
   },
-  querySelectorAll() {
-    return [];
+  querySelectorAll(selector) {
+    return selector === ".thumb" ? [animatedThumb] : [];
   },
 };
 card._render();
@@ -313,6 +354,7 @@ assert.match(
 );
 
 card._pendingValue = "Off";
+card._pendingAnimation = { from: 0, to: 2 };
 card._render();
 assert.match(
   card.shadowRoot.innerHTML,
@@ -321,6 +363,8 @@ assert.match(
 );
 assert.ok(animationTargets.includes(".thumb-icon"), "State changes should animate only the thumb icon.");
 assert.ok(!animationTargets.includes(".thumb"), "State changes must not animate the positioned thumb.");
+assert.equal(thumbStyle.transform, "translateY(200%)");
+assert.equal(JSON.stringify(card._pendingAnimation), JSON.stringify({ from: 0, to: 2 }));
 
 const horizontalCard = new Card();
 horizontalCard.setConfig({ entity: "input_select.demo", orientation: "horizontal" });

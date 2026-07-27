@@ -293,6 +293,8 @@ class ThreeStateSwitchCard extends HTMLElement {
     this._activityLoading = false;
     this._activityRequest = 0;
     this._lastRenderedState = "";
+    this._pendingAnimation = null;
+    this._animationTimer = 0;
     this._renderQueued = false;
     this._dialogOpen = false;
     this._historyDialogOpen = false;
@@ -368,11 +370,29 @@ class ThreeStateSwitchCard extends HTMLElement {
 
   disconnectedCallback() {
     this._clearPending();
+    this._clearThumbAnimation();
     if (this._historyFetchTimer) {
       clearTimeout(this._historyFetchTimer);
       this._historyFetchTimer = 0;
     }
     this._pointer = null;
+  }
+
+  _clearThumbAnimation() {
+    this._pendingAnimation = null;
+    if (this._animationTimer) {
+      clearTimeout(this._animationTimer);
+      this._animationTimer = 0;
+    }
+  }
+
+  _armThumbAnimation(from, to) {
+    this._clearThumbAnimation();
+    this._pendingAnimation = { from, to };
+    this._animationTimer = setTimeout(() => {
+      this._pendingAnimation = null;
+      this._animationTimer = 0;
+    }, 500);
   }
 
   _clearPending() {
@@ -503,6 +523,9 @@ class ThreeStateSwitchCard extends HTMLElement {
     `;
 
     this._bind(options, disabled);
+    if (this._pendingAnimation?.to === currentIndex) {
+      this._animateThumbTransition(this._pendingAnimation.from, currentIndex);
+    }
     if (this._lastRenderedState && this._lastRenderedState !== currentValue) {
       this.shadowRoot.querySelector(".thumb-icon")?.animate(
         [{ transform: "translate(-50%, -50%) scale(.88)", opacity: .72 }, { transform: "translate(-50%, -50%) scale(1)", opacity: 1 }],
@@ -510,6 +533,25 @@ class ThreeStateSwitchCard extends HTMLElement {
       );
     }
     this._lastRenderedState = currentValue;
+  }
+
+  _animateThumbTransition(fromIndex, toIndex) {
+    if (fromIndex < 0 || fromIndex === toIndex) return;
+    const nextFrame = globalThis.requestAnimationFrame || ((callback) => setTimeout(callback, 0));
+    this.shadowRoot.querySelectorAll(".thumb").forEach((thumb) => {
+      const isVertical = thumb.closest?.(".control")?.classList.contains("vertical");
+      const axis = isVertical ? "Y" : "X";
+      thumb.style.transition = "none";
+      thumb.style.transform = `translate${axis}(${fromIndex * 100}%)`;
+      void thumb.offsetWidth;
+      nextFrame(() => {
+        thumb.style.removeProperty("transition");
+        thumb.style.transform = `translate${axis}(${toIndex * 100}%)`;
+        thumb.addEventListener("transitionend", () => {
+          thumb.style.removeProperty("transform");
+        }, { once: true });
+      });
+    });
   }
 
   _renderDefault(name, subtitle, current, currentIndex, options, disabled) {
@@ -1080,14 +1122,26 @@ class ThreeStateSwitchCard extends HTMLElement {
         if (event.cancelable) event.preventDefault();
         event.stopPropagation();
         control.setPointerCapture?.(event.pointerId);
-        this._pointer = { id: event.pointerId };
-        this._previewPointer(event, control);
+        this._pointer = {
+          id: event.pointerId,
+          startX: event.clientX,
+          startY: event.clientY,
+          dragging: false,
+        };
       }, { passive: false });
 
       control.addEventListener("pointermove", (event) => {
         if (this._pointer?.id !== event.pointerId) return;
         if (event.cancelable) event.preventDefault();
         event.stopPropagation();
+        if (!this._pointer.dragging) {
+          const distance = Math.hypot(
+            event.clientX - this._pointer.startX,
+            event.clientY - this._pointer.startY
+          );
+          if (distance < 6) return;
+          this._pointer.dragging = true;
+        }
         this._previewPointer(event, control);
       }, { passive: false });
 
@@ -1095,7 +1149,9 @@ class ThreeStateSwitchCard extends HTMLElement {
         if (this._pointer?.id !== event.pointerId) return;
         if (event.cancelable) event.preventDefault();
         event.stopPropagation();
-        const index = this._pointer.index;
+        const index = this._pointer.dragging
+          ? this._pointer.index
+          : this._pointerIndex(event, control);
         this._pointer = null;
         if (Number.isInteger(index)) this._selectIndex(index, options);
       };
@@ -1107,12 +1163,16 @@ class ThreeStateSwitchCard extends HTMLElement {
     });
   }
 
-  _previewPointer(event, control) {
+  _pointerIndex(event, control) {
     const rect = control.getBoundingClientRect();
     const ratio = control.classList.contains("horizontal")
       ? (event.clientX - rect.left) / rect.width
       : (event.clientY - rect.top) / rect.height;
-    const index = Math.max(0, Math.min(2, Math.floor(ratio * 3)));
+    return Math.max(0, Math.min(2, Math.floor(ratio * 3)));
+  }
+
+  _previewPointer(event, control) {
+    const index = this._pointerIndex(event, control);
     const changed = this._pointer.index !== index;
     this._pointer.index = index;
     this.shadowRoot.querySelectorAll(".control").forEach((activeControl) => {
@@ -1133,6 +1193,9 @@ class ThreeStateSwitchCard extends HTMLElement {
     }
 
     if (this._config.haptic) haptic("selection");
+    const visibleValue = this._pendingValue || currentValue;
+    const fromIndex = findOptionIndex(options, visibleValue);
+    if (fromIndex >= 0) this._armThumbAnimation(fromIndex, index);
     if (this._config.optimistic) {
       this._pendingValue = option.value;
       this._armPendingTimeout(option.label);
@@ -1155,6 +1218,7 @@ class ThreeStateSwitchCard extends HTMLElement {
         index,
       });
     } catch (error) {
+      this._clearThumbAnimation();
       this._clearPending();
       this._queueRender();
       fireEvent(this, "hass-notification", {
