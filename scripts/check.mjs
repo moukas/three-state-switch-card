@@ -187,6 +187,37 @@ assert.equal(
   ])
 );
 
+const minimalAutoActiveCard = new Card();
+minimalAutoActiveCard.setConfig({
+  state_entity: "binary_sensor.demo_active",
+  auto_entity: "input_boolean.demo_auto",
+  manual_entity: "input_boolean.demo_manual",
+  variant: "minimal",
+});
+minimalAutoActiveCard.isConnected = true;
+minimalAutoActiveCard.shadowRoot = {
+  innerHTML: "",
+  querySelector() { return null; },
+  querySelectorAll() { return []; },
+};
+minimalAutoActiveCard.hass = {
+  states: {
+    "binary_sensor.demo_active": { state: "on", attributes: {} },
+    "input_boolean.demo_auto": { state: "on", attributes: {} },
+    "input_boolean.demo_manual": { state: "off", attributes: {} },
+  },
+};
+assert.match(
+  minimalAutoActiveCard.shadowRoot.innerHTML,
+  /minimal-row" style="--state-accent:#03a9f4"/,
+  "Minimal row background and icon must retain the Auto color."
+);
+assert.match(
+  minimalAutoActiveCard.shadowRoot.innerHTML,
+  /thumb" style="--active-color:#fbc02d"/,
+  "Only the minimal switch thumb must use the Auto-active color."
+);
+
 const booleanLabelsCard = new Card();
 booleanLabelsCard.setConfig({
   state_entity: "binary_sensor.demo_active",
@@ -202,6 +233,26 @@ const booleanLabels = booleanLabelsCard._options();
 assert.equal(JSON.stringify(booleanLabels.map((option) => option.value)), JSON.stringify(["On", "Auto", "Off"]));
 assert.equal(JSON.stringify(booleanLabels.map((option) => option.label)), JSON.stringify(["Zapnuto", "Automatika", "Vypnuto"]));
 assert.equal(booleanLabels[0].icon, "mdi:lightbulb-on");
+
+const autoIndicatorCard = new Card();
+autoIndicatorCard.setConfig({
+  entity: "input_select.demo",
+  actual_state_entity: "binary_sensor.demo_active",
+});
+autoIndicatorCard.hass = {
+  states: {
+    "input_select.demo": { state: "Auto", attributes: { options: ["On", "Auto", "Off"] } },
+    "binary_sensor.demo_active": { state: "on", attributes: {} },
+  },
+};
+assert.equal(autoIndicatorCard._subtitle(autoIndicatorCard._options()[1]), "Auto · On");
+assert.equal(autoIndicatorCard._activeColor(autoIndicatorCard._options()[1]), "#fbc02d");
+autoIndicatorCard._hass.states["binary_sensor.demo_active"].state = "off";
+assert.equal(autoIndicatorCard._subtitle(autoIndicatorCard._options()[1]), "Auto · Off");
+assert.equal(autoIndicatorCard._activeColor(autoIndicatorCard._options()[1]), "");
+assert.equal(autoIndicatorCard._subtitle(autoIndicatorCard._options()[0]), "On");
+autoIndicatorCard._config.show_auto_state = false;
+assert.equal(autoIndicatorCard._subtitle(autoIndicatorCard._options()[1]), "Auto");
 
 card.hass = {
   states: {

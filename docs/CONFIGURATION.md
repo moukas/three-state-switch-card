@@ -26,6 +26,8 @@ uses the first three values from the entity `options` attribute.
 | `reverse` | boolean | `false` | Reverses the state order |
 | `show_name` | boolean | `true` | Shows the title |
 | `show_subtitle` | boolean | `true` | Shows the subtitle |
+| `show_auto_state` | boolean | `true` | In Auto mode, appends the actual on/off state to the default subtitle |
+| `auto_active_color` | string | `#fbc02d` | Active thumb/icon color when Auto mode is actually on |
 | `show_labels` | boolean | `true` | Shows text labels |
 | `compact` | boolean | `false` | Uses tighter spacing and dimensions |
 | `interaction` | string | `tap-drag` | `tap` or `tap-drag` |
@@ -58,6 +60,29 @@ For the boolean model (`state_entity` + `auto_entity`), the three internal
 `value` entries are fixed as `On`, `Auto`, and `Off` because they drive the
 control logic. You can still customize the visible `label`, `icon`, and `color`
 for each state in the card editor or YAML.
+
+## Auto Mode Actual-State Indicator
+
+Set `state_entity` to the entity which reports the real device state. When the
+selected mode is `Auto`, the card's default subtitle shows both values, for
+example `Auto · On` or `Auto · Off`. This also works with a legacy
+`input_select` / `select` configuration when `actual_state_entity` is set.
+
+```yaml
+type: custom:three-state-switch-card
+entity: input_select.heating_mode
+actual_state_entity: binary_sensor.heating_active
+actual_state_on_label: Zapnuto
+actual_state_off_label: Vypnuto
+```
+
+Set `show_auto_state: false` to retain the previous subtitle (`Auto`). An
+explicit `subtitle` always takes precedence over the dynamic value.
+
+When the real state is on in Auto mode, the active switch thumb is yellow by
+default. This is also the visual indicator in the minimal card, which has no
+subtitle. Set `auto_active_color` to any CSS color (for example
+`var(--warning-color)`) to override it.
 
 ## Example for `input_select`
 

@@ -1,7 +1,7 @@
 lovelace:
   mode: yaml
   resources:
-    - url: /local/three-state-switch-card/three-state-switch-card.js?v=0.1.0-minimal-shared-state
+    - url: /local/three-state-switch-card/three-state-switch-card.js?v=0.1.5-minimal-thumb
       type: module
 
 recorder:
@@ -24,9 +24,15 @@ input_boolean:
   heating_manual:
     name: Heating manual output
     initial: false
+  heating_external_force:
+    name: Heating external force ON
+    icon: mdi:flash
+    initial: false
 
 template:
   - binary_sensor:
       - name: Heating active
         unique_id: heating_active
-        state: "{{ is_state('input_boolean.heating_manual', 'on') }}"
+        state: >-
+          {{ is_state('input_boolean.heating_external_force', 'on') or
+             is_state('input_boolean.heating_manual', 'on') }}

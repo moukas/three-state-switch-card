@@ -4,6 +4,15 @@ views:
     path: default_view
     badges: []
     cards:
+      - type: entities
+        title: Test controls
+        entities:
+          - entity: input_boolean.heating_external_force
+            name: External force ON
+          - entity: input_boolean.heating_auto
+            name: Auto mode
+          - entity: input_boolean.heating_manual
+            name: Manual output
       - type: custom:three-state-switch-card
         state_entity: binary_sensor.heating_active
         auto_entity: input_boolean.heating_auto
