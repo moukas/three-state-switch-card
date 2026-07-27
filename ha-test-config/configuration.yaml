@@ -1,7 +1,7 @@
 lovelace:
   mode: yaml
   resources:
-    - url: /local/three-state-switch-card/three-state-switch-card.js?v=0.1.5-minimal-thumb
+    - url: /local/three-state-switch-card/three-state-switch-card.js?v=0.1.5-confirmed-auto
       type: module
 
 recorder:

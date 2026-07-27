@@ -217,6 +217,12 @@ assert.match(
   /thumb" style="--active-color:#fbc02d"/,
   "Only the minimal switch thumb must use the Auto-active color."
 );
+minimalAutoActiveCard._hass.states["input_boolean.demo_auto"].state = "off";
+assert.equal(
+  minimalAutoActiveCard._activeColor(minimalAutoActiveCard._options()[1]),
+  "#03a9f4",
+  "The Auto-active color must wait until auto mode is confirmed."
+);
 
 const booleanLabelsCard = new Card();
 booleanLabelsCard.setConfig({

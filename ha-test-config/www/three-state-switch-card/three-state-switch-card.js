@@ -457,7 +457,10 @@ class ThreeStateSwitchCard extends HTMLElement {
 
     const actualEntity = stateEntity(this._config);
     const actualState = this._hass?.states?.[actualEntity]?.state;
-    return isOnState(actualState)
+    const autoConfirmed = booleanModel(this._config)
+      ? isOnState(this._hass?.states?.[this._config.auto_entity]?.state)
+      : this._hass?.states?.[this._config.entity]?.state === current.value;
+    return autoConfirmed && isOnState(actualState)
       ? this._config.auto_active_color || current.color
       : current.color;
   }
