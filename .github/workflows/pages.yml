@@ -33,7 +33,7 @@ jobs:
           cp demo/index.html site/index.html
           cp dist/three-state-switch-card.js site/three-state-switch-card.js
       - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v4
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: site
       - id: deployment
