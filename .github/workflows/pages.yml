@@ -32,7 +32,7 @@ jobs:
           mkdir -p site
           cp demo/index.html site/index.html
           cp dist/three-state-switch-card.js site/three-state-switch-card.js
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v4
         with:
           path: site
