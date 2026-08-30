@@ -1888,7 +1888,10 @@ class ThreeStateSwitchCardEditor extends HTMLElement {
 
   set hass(value) {
     this._hass = value;
-    this._render();
+    // Home Assistant supplies a fresh hass object whenever its state changes.
+    // Replacing the editor DOM here closes an open native select or entity-picker
+    // menu before the user can choose a value.
+    this._syncEntityPickers();
   }
 
   setConfig(config) {
@@ -2024,15 +2027,8 @@ class ThreeStateSwitchCardEditor extends HTMLElement {
       </div>
     `;
 
+    this._syncEntityPickers();
     this.shadowRoot.querySelectorAll("ha-entity-picker[data-key]").forEach((el) => {
-      const includeDomains = {
-        entity: ["input_select", "select"],
-        auto_entity: ["input_boolean", "switch", "binary_sensor"],
-        manual_entity: ["input_boolean", "switch"],
-      }[el.dataset.key];
-      el.hass = this._hass;
-      el.value = this._config?.[el.dataset.key] ?? "";
-      if (includeDomains) el.includeDomains = includeDomains;
       el.addEventListener("value-changed", (event) => {
         this._updateConfigValue(el.dataset.key, event.detail?.value ?? "");
       });
@@ -2046,6 +2042,20 @@ class ThreeStateSwitchCardEditor extends HTMLElement {
     });
     this.shadowRoot.querySelectorAll("[data-option]").forEach((el) => {
       el.addEventListener("change", () => this._updateOption(el));
+    });
+  }
+
+  _syncEntityPickers() {
+    if (!this.shadowRoot) return;
+    this.shadowRoot.querySelectorAll("ha-entity-picker[data-key]").forEach((el) => {
+      const includeDomains = {
+        entity: ["input_select", "select"],
+        auto_entity: ["input_boolean", "switch", "binary_sensor"],
+        manual_entity: ["input_boolean", "switch"],
+      }[el.dataset.key];
+      el.hass = this._hass;
+      el.value = this._config?.[el.dataset.key] ?? "";
+      if (includeDomains) el.includeDomains = includeDomains;
     });
   }
 

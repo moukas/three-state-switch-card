@@ -1,6 +1,6 @@
 {
   "name": "three-state-switch-card",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "A polished three-position Home Assistant Lovelace switch for input_select and select entities.",
   "type": "module",
   "scripts": {
