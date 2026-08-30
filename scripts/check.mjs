@@ -755,6 +755,19 @@ assert.match(editor.shadowRoot.innerHTML, />Minimal</);
 assert.match(editor.shadowRoot.innerHTML, /data-key="dialog_orientation"/);
 assert.match(editor.shadowRoot.innerHTML, /Expanded minimal dialog orientation/);
 
+const editorPicker = { dataset: { key: "entity" } };
+let editorRenders = 0;
+const originalEditorRender = editor._render.bind(editor);
+editor._render = () => { editorRenders += 1; originalEditorRender(); };
+editor.shadowRoot.querySelectorAll = (selector) =>
+  selector === "ha-entity-picker[data-key]" ? [editorPicker] : [];
+const editorHass = { states: { "input_select.demo": { state: "Auto" } } };
+editor.hass = editorHass;
+assert.equal(editorRenders, 0, "A hass update must not recreate the editor while a picker is open.");
+assert.equal(editorPicker.hass, editorHass, "Existing entity pickers must receive the latest hass object.");
+assert.equal(editorPicker.value, "input_select.demo");
+assert.equal(Array.from(editorPicker.includeDomains).join(","), "input_select,select");
+
 const booleanEditor = new Editor();
 booleanEditor.setConfig({
   state_entity: "binary_sensor.demo_active",
