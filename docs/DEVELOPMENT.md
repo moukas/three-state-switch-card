@@ -14,6 +14,19 @@ The command:
 2. Injects the version from `package.json`
 3. Runs static and behavioral checks against the built card
 
+For changes to rendering or animation, also run the offline browser regression
+in the WSL environment with Selenium, Chromium and ChromeDriver installed:
+
+```bash
+python scripts/browser-animation-check.py
+```
+
+It checks that repeated state updates and service acknowledgements preserve one
+continuous transition, including both orientations and the minimal-card dialog.
+It also checks rapid direction changes, focus, listener cleanup, delayed
+confirmation, error rollback, dialogs and disabling/re-enabling the controls.
+No Home Assistant instance or real device is used.
+
 ## Development Cycle
 
 1. Update `src/three-state-switch-card.js`

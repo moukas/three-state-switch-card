@@ -293,8 +293,7 @@ class ThreeStateSwitchCard extends HTMLElement {
     this._activityLoading = false;
     this._activityRequest = 0;
     this._lastRenderedState = "";
-    this._pendingAnimation = null;
-    this._animationTimer = 0;
+    this._boundListeners = [];
     this._renderQueued = false;
     this._dialogOpen = false;
     this._historyDialogOpen = false;
@@ -370,29 +369,12 @@ class ThreeStateSwitchCard extends HTMLElement {
 
   disconnectedCallback() {
     this._clearPending();
-    this._clearThumbAnimation();
+    this._unbind();
     if (this._historyFetchTimer) {
       clearTimeout(this._historyFetchTimer);
       this._historyFetchTimer = 0;
     }
     this._pointer = null;
-  }
-
-  _clearThumbAnimation() {
-    this._pendingAnimation = null;
-    if (this._animationTimer) {
-      clearTimeout(this._animationTimer);
-      this._animationTimer = 0;
-    }
-  }
-
-  _armThumbAnimation(from, to) {
-    this._clearThumbAnimation();
-    this._pendingAnimation = { from, to };
-    this._animationTimer = setTimeout(() => {
-      this._pendingAnimation = null;
-      this._animationTimer = 0;
-    }, 500);
   }
 
   _clearPending() {
@@ -506,7 +488,7 @@ class ThreeStateSwitchCard extends HTMLElement {
       this._subtitle(current);
     const isMinimal = this._config.variant === "minimal";
 
-    this.shadowRoot.innerHTML = `
+    this._updateContent(`
       <style>${this._styles()}</style>
       <ha-card
         class="${escapeHtml(this._config.variant)} ${this._config.compact ? "compact" : ""} ${disabled ? "disabled" : ""}"
@@ -520,12 +502,9 @@ class ThreeStateSwitchCard extends HTMLElement {
         ${this._historyDialogOpen ? this._renderHistoryDialog(name, options) : ""}
         ${this._pendingValue ? `<div class="pending" aria-live="polite">Saving...</div>` : ""}
       </ha-card>
-    `;
+    `);
 
     this._bind(options, disabled);
-    if (this._pendingAnimation?.to === currentIndex) {
-      this._animateThumbTransition(this._pendingAnimation.from, currentIndex);
-    }
     if (this._lastRenderedState && this._lastRenderedState !== currentValue) {
       this.shadowRoot.querySelector(".thumb-icon")?.animate(
         [{ transform: "translate(-50%, -50%) scale(.88)", opacity: .72 }, { transform: "translate(-50%, -50%) scale(1)", opacity: 1 }],
@@ -535,23 +514,39 @@ class ThreeStateSwitchCard extends HTMLElement {
     this._lastRenderedState = currentValue;
   }
 
-  _animateThumbTransition(fromIndex, toIndex) {
-    if (fromIndex < 0 || fromIndex === toIndex) return;
-    const nextFrame = globalThis.requestAnimationFrame || ((callback) => setTimeout(callback, 0));
-    this.shadowRoot.querySelectorAll(".thumb").forEach((thumb) => {
-      const isVertical = thumb.closest?.(".control")?.classList.contains("vertical");
-      const axis = isVertical ? "Y" : "X";
-      thumb.style.transition = "none";
-      thumb.style.transform = `translate${axis}(${fromIndex * 100}%)`;
-      void thumb.offsetWidth;
-      nextFrame(() => {
-        thumb.style.removeProperty("transition");
-        thumb.style.transform = `translate${axis}(${toIndex * 100}%)`;
-        thumb.addEventListener("transitionend", () => {
-          thumb.style.removeProperty("transform");
-        }, { once: true });
-      });
+  _updateContent(html) {
+    const template = document.createElement("template");
+    template.innerHTML = html;
+    this._patchChildren(this.shadowRoot, template.content);
+  }
+
+  _patchChildren(parent, nextParent) {
+    // Keep controls connected so CSS transitions, focus and pointer capture survive
+    // hass updates, service acknowledgements and asynchronous history responses.
+    const previous = [...parent.childNodes];
+    const next = [...nextParent.childNodes];
+    next.forEach((node, index) => {
+      const current = previous[index];
+      if (!current) {
+        parent.appendChild(node);
+      } else if (current.nodeType !== node.nodeType || current.nodeName !== node.nodeName) {
+        current.replaceWith(node);
+      } else if (node.nodeType === 1) {
+        for (const attribute of [...current.attributes]) {
+          if (!node.hasAttribute(attribute.name)) current.removeAttribute(attribute.name);
+        }
+        for (const attribute of node.attributes) {
+          if (current.getAttribute(attribute.name) !== attribute.value) {
+            current.setAttribute(attribute.name, attribute.value);
+          }
+        }
+        // ha-icon owns its internal DOM (also in the standalone demo).
+        if (node.localName !== "ha-icon") this._patchChildren(current, node);
+      } else if (current.nodeValue !== node.nodeValue) {
+        current.nodeValue = node.nodeValue;
+      }
     });
+    previous.slice(next.length).forEach((node) => node.remove());
   }
 
   _renderDefault(name, subtitle, current, currentIndex, options, disabled) {
@@ -1032,7 +1027,20 @@ class ThreeStateSwitchCard extends HTMLElement {
     `;
   }
 
+  _unbind() {
+    this._boundListeners.forEach(([element, type, handler, options]) => {
+      element.removeEventListener(type, handler, options);
+    });
+    this._boundListeners = [];
+  }
+
   _bind(options, disabled) {
+    this._unbind();
+    const listen = (element, type, handler, options) => {
+      if (!element) return;
+      element.addEventListener(type, handler, options);
+      this._boundListeners.push([element, type, handler, options]);
+    };
     const controls = this.shadowRoot.querySelectorAll(".control");
     const interactive = this.shadowRoot.querySelectorAll(".zone, .label");
     const minimalSummary = this.shadowRoot.querySelector(".minimal-summary");
@@ -1043,30 +1051,30 @@ class ThreeStateSwitchCard extends HTMLElement {
     const historyDialogBackdrop = this.shadowRoot.querySelector(".history-dialog-backdrop");
     const historyDialogClose = this.shadowRoot.querySelector(".history-dialog-close");
 
-    historyAction?.addEventListener("click", (event) => {
+    listen(historyAction, "click", (event) => {
       event.stopPropagation();
       this._openHistoryDialog(options);
     });
 
-    dialogHistoryAction?.addEventListener("click", (event) => {
+    listen(dialogHistoryAction, "click", (event) => {
       event.stopPropagation();
       this._dialogOpen = false;
       this._openHistoryDialog(options);
     });
 
-    minimalSummary?.addEventListener("click", (event) => {
+    listen(minimalSummary, "click", (event) => {
       event.stopPropagation();
       this._dialogOpen = true;
       this._queueRender();
     });
 
-    dialogClose?.addEventListener("click", (event) => {
+    listen(dialogClose, "click", (event) => {
       event.stopPropagation();
       this._dialogOpen = false;
       this._queueRender();
     });
 
-    dialogBackdrop?.addEventListener("click", (event) => {
+    listen(dialogBackdrop, "click", (event) => {
       if (event.target !== dialogBackdrop) return;
       this._dialogOpen = false;
       this._queueRender();
@@ -1076,15 +1084,15 @@ class ThreeStateSwitchCard extends HTMLElement {
       if (event.target !== dialogBackdrop || !event.cancelable) return;
       event.preventDefault();
     };
-    dialogBackdrop?.addEventListener("touchmove", preventBackdropScroll, { passive: false });
+    listen(dialogBackdrop, "touchmove", preventBackdropScroll, { passive: false });
 
-    historyDialogClose?.addEventListener("click", (event) => {
+    listen(historyDialogClose, "click", (event) => {
       event.stopPropagation();
       this._historyDialogOpen = false;
       this._queueRender();
     });
 
-    historyDialogBackdrop?.addEventListener("click", (event) => {
+    listen(historyDialogBackdrop, "click", (event) => {
       if (event.target !== historyDialogBackdrop) return;
       this._historyDialogOpen = false;
       this._queueRender();
@@ -1093,14 +1101,14 @@ class ThreeStateSwitchCard extends HTMLElement {
     if (disabled) return;
 
     interactive.forEach((element) => {
-      element.addEventListener("click", (event) => {
+      listen(element, "click", (event) => {
         event.stopPropagation();
         this._selectIndex(Number(element.dataset.index), options);
       });
     });
 
     controls.forEach((control) => {
-      control.addEventListener("keydown", (event) => {
+      listen(control, "keydown", (event) => {
         const index = optionIndex(options, this._pendingValue || this._currentValue());
         let next = index;
         if (["ArrowDown", "ArrowRight"].includes(event.key)) next = Math.min(2, index + 1);
@@ -1117,7 +1125,7 @@ class ThreeStateSwitchCard extends HTMLElement {
     if (this._config.interaction !== "tap-drag") return;
 
     controls.forEach((control) => {
-      control.addEventListener("pointerdown", (event) => {
+      listen(control, "pointerdown", (event) => {
         if (event.pointerType === "mouse" && event.button !== 0) return;
         if (event.cancelable) event.preventDefault();
         event.stopPropagation();
@@ -1130,7 +1138,7 @@ class ThreeStateSwitchCard extends HTMLElement {
         };
       }, { passive: false });
 
-      control.addEventListener("pointermove", (event) => {
+      listen(control, "pointermove", (event) => {
         if (this._pointer?.id !== event.pointerId) return;
         if (event.cancelable) event.preventDefault();
         event.stopPropagation();
@@ -1155,8 +1163,8 @@ class ThreeStateSwitchCard extends HTMLElement {
         this._pointer = null;
         if (Number.isInteger(index)) this._selectIndex(index, options);
       };
-      control.addEventListener("pointerup", finish, { passive: false });
-      control.addEventListener("pointercancel", () => {
+      listen(control, "pointerup", finish, { passive: false });
+      listen(control, "pointercancel", () => {
         this._pointer = null;
         this._queueRender();
       });
@@ -1193,9 +1201,6 @@ class ThreeStateSwitchCard extends HTMLElement {
     }
 
     if (this._config.haptic) haptic("selection");
-    const visibleValue = this._pendingValue || currentValue;
-    const fromIndex = findOptionIndex(options, visibleValue);
-    if (fromIndex >= 0) this._armThumbAnimation(fromIndex, index);
     if (this._config.optimistic) {
       this._pendingValue = option.value;
       this._armPendingTimeout(option.label);
@@ -1218,7 +1223,6 @@ class ThreeStateSwitchCard extends HTMLElement {
         index,
       });
     } catch (error) {
-      this._clearThumbAnimation();
       this._clearPending();
       this._queueRender();
       fireEvent(this, "hass-notification", {
