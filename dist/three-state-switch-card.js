@@ -4,7 +4,7 @@
  *
  * @license MIT
  */
-const CARD_VERSION = "0.1.6";
+const CARD_VERSION = "0.1.7";
 const CARD_TAG = "three-state-switch-card";
 const EDITOR_TAG = "three-state-switch-card-editor";
 const SUPPORTED_DOMAINS = new Set(["input_select", "select"]);
