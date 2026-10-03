@@ -105,6 +105,11 @@ new vm.Script(code, { filename: file }).runInContext(context);
 const Card = context.customElements.get("three-state-switch-card");
 const Editor = context.customElements.get("three-state-switch-card-editor");
 
+// These checks inspect generated markup without a browser DOM. The real DOM
+// reconciliation and transition continuity are covered by browser-animation-check.py.
+Card.prototype._updateContent = function (html) { this.shadowRoot.innerHTML = html; };
+Card.prototype._unbind = function () { this._boundListeners = []; };
+
 assert.ok(Card, "Card custom element was not registered.");
 assert.ok(Editor, "Editor custom element was not registered.");
 
@@ -261,9 +266,9 @@ pendingOriginCard.hass = {
 pendingOriginCard._pendingValue = "Off";
 await pendingOriginCard._selectIndex(1, pendingOriginCard._options());
 assert.equal(
-  JSON.stringify(pendingOriginCard._pendingAnimation),
-  JSON.stringify({ from: 2, to: 1 }),
-  "Off to Auto must animate from the visibly pending Off position even when the actual state is on."
+  pendingOriginCard._pendingValue,
+  "Auto",
+  "A new selection must replace the visibly pending value even when the actual state is on."
 );
 
 const autoIndicatorCard = new Card();
@@ -354,7 +359,6 @@ assert.match(
 );
 
 card._pendingValue = "Off";
-card._pendingAnimation = { from: 0, to: 2 };
 card._render();
 assert.match(
   card.shadowRoot.innerHTML,
@@ -363,8 +367,7 @@ assert.match(
 );
 assert.ok(animationTargets.includes(".thumb-icon"), "State changes should animate only the thumb icon.");
 assert.ok(!animationTargets.includes(".thumb"), "State changes must not animate the positioned thumb.");
-assert.equal(thumbStyle.transform, "translateY(200%)");
-assert.equal(JSON.stringify(card._pendingAnimation), JSON.stringify({ from: 0, to: 2 }));
+assert.equal(thumbStyle.transform, "", "Rendering must leave movement to the persistent thumb's CSS transition.");
 
 const horizontalCard = new Card();
 horizontalCard.setConfig({ entity: "input_select.demo", orientation: "horizontal" });
